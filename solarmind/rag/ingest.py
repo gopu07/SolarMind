@@ -3,6 +3,7 @@ Layer 5 — RAG Ingestion Pipeline.
 
 Constructs document chunks containing structured telemetry and ML predictions
 plus natural language summaries, then embeds and stores them in ChromaDB.
+Also handles knowledge base ingestion and maintenance history storage.
 """
 
 from __future__ import annotations
@@ -183,3 +184,192 @@ def cleanup_old_documents() -> None:
             log.info("cleanup_reports_done", deleted=len(results["ids"]))
     except Exception:
         pass  # Collection does not exist yet
+
+
+# =====================================================================
+# Knowledge Base Ingestion (Step 2)
+# =====================================================================
+def ingest_knowledge_base() -> int:
+    """Parse structured YAML knowledge documents and ingest into ChromaDB.
+
+    Reads all ``.yaml`` files from ``config.KNOWLEDGE_BASE_DIR``,
+    converts each chunk into a combined natural-language document, and
+    upserts into the ``knowledge_base`` collection.
+
+    Returns:
+        Total number of chunks ingested.
+    """
+    import yaml
+
+    kb_dir = config.KNOWLEDGE_BASE_DIR
+    if not kb_dir.exists():
+        log.warning("knowledge_base_dir_missing", path=str(kb_dir))
+        return 0
+
+    client = get_chroma_client()
+    ef = _get_embedding_function()
+    collection = client.get_or_create_collection(
+        name="knowledge_base", embedding_function=ef
+    )
+
+    total = 0
+    for yaml_file in sorted(kb_dir.glob("*.yaml")):
+        try:
+            with open(yaml_file, "r", encoding="utf-8") as f:
+                doc = yaml.safe_load(f)
+        except Exception as e:
+            log.warning("yaml_parse_failed", file=str(yaml_file), error=str(e))
+            continue
+
+        concept = doc.get("concept", yaml_file.stem)
+        category = doc.get("category", "general")
+
+        for chunk in doc.get("chunks", []):
+            chunk_id = chunk.get("id", f"{concept}_{total}")
+            title = chunk.get("title", "Untitled")
+
+            # Build NL document from structured fields
+            parts = [f"# {title}\n", f"Concept: {concept} | Category: {category}\n"]
+
+            if chunk.get("symptoms"):
+                parts.append("## Symptoms")
+                for s in chunk["symptoms"]:
+                    parts.append(f"- {s}")
+
+            if chunk.get("sensor_signals"):
+                parts.append("\n## Sensor Signals")
+                for s in chunk["sensor_signals"]:
+                    parts.append(f"- {s}")
+
+            if chunk.get("probable_causes"):
+                parts.append("\n## Probable Causes")
+                for c in chunk["probable_causes"]:
+                    parts.append(f"- {c}")
+
+            if chunk.get("recommended_actions"):
+                parts.append("\n## Recommended Actions")
+                for a in chunk["recommended_actions"]:
+                    parts.append(f"- {a}")
+
+            document_content = "\n".join(parts)
+
+            metadata = {
+                "concept": concept,
+                "category": category,
+                "chunk_id": chunk_id,
+                "title": title,
+                "doc_type": "knowledge_base",
+                "timestamp": int(time.time()),
+            }
+
+            collection.upsert(
+                documents=[document_content],
+                metadatas=[metadata],
+                ids=[chunk_id],
+            )
+            total += 1
+
+    log.info("knowledge_base_ingested", total_chunks=total)
+    return total
+
+
+# =====================================================================
+# Maintenance History Ingestion (Step 6)
+# =====================================================================
+def ingest_maintenance_event(
+    event_id: str,
+    inverter_id: str,
+    plant_id: str,
+    event_type: str,
+    description: str,
+    resolution: str,
+    timestamp_unix: int,
+    root_cause: str = "",
+    severity: str = "MEDIUM",
+) -> None:
+    """Ingest a historical maintenance / failure event into ChromaDB.
+
+    Args:
+        event_id: Unique identifier for this event.
+        inverter_id: Related device ID.
+        plant_id: Facility ID.
+        event_type: Category (e.g., "fan_failure", "igbt_failure").
+        description: Free-text description of the event.
+        resolution: What was done to resolve it.
+        timestamp_unix: When the event occurred.
+        root_cause: Determined root cause, if available.
+        severity: LOW / MEDIUM / HIGH / CRITICAL.
+    """
+    client = get_chroma_client()
+    ef = _get_embedding_function()
+    collection = client.get_or_create_collection(
+        name="maintenance_history", embedding_function=ef
+    )
+
+    nl_summary = (
+        f"Maintenance Event {event_id} for Inverter {inverter_id} "
+        f"(Plant {plant_id}). Type: {event_type}. Severity: {severity}. "
+        f"Description: {description} "
+        f"Root Cause: {root_cause or 'undetermined'}. "
+        f"Resolution: {resolution}"
+    )
+
+    metadata = {
+        "event_id": event_id,
+        "inverter_id": inverter_id,
+        "plant_id": plant_id,
+        "event_type": event_type,
+        "severity": severity,
+        "timestamp": int(timestamp_unix),
+        "doc_type": "maintenance_history",
+    }
+
+    collection.upsert(
+        documents=[nl_summary],
+        metadatas=[metadata],
+        ids=[event_id],
+    )
+    log.info("ingested_maintenance_event", event_id=event_id)
+
+
+# =====================================================================
+# BM25 Corpus Builder
+# =====================================================================
+def build_bm25_corpus(
+    collection_names: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve all documents from specified ChromaDB collections.
+
+    Used to build a BM25 index for keyword search alongside vector retrieval.
+
+    Args:
+        collection_names: Collections to include; defaults to all RAG collections.
+
+    Returns:
+        List of document dicts with ``content`` and ``metadata``.
+    """
+    if collection_names is None:
+        collection_names = [
+            "inverter_status",
+            "inverter_reports",
+            "knowledge_base",
+            "maintenance_history",
+        ]
+
+    client = get_chroma_client()
+    all_docs: List[Dict[str, Any]] = []
+
+    for name in collection_names:
+        try:
+            coll = client.get_collection(name)
+            result = coll.get(include=["documents", "metadatas"])
+            if result and result["documents"]:
+                for doc, meta in zip(
+                    result["documents"],
+                    result["metadatas"] or [{}] * len(result["documents"]),
+                ):
+                    all_docs.append({"content": doc, "metadata": meta})
+        except Exception:
+            pass  # collection does not exist yet
+
+    return all_docs

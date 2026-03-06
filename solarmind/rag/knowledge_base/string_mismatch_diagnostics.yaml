@@ -1,0 +1,95 @@
+concept: string_mismatch_diagnostics
+category: dc_side_diagnostics
+description: >
+  PV string current imbalance and mismatch failure modes including partial shading,
+  module degradation, bypass diode failures, and wiring issues.
+
+chunks:
+  - id: smd_001
+    title: "Partial Shading Mismatch"
+    symptoms:
+      - "one or more strings producing 15-40% less current than peers"
+      - "mismatch pattern changes throughout the day"
+      - "power loss correlates with sun position"
+    sensor_signals:
+      - "string_mismatch_cv > 0.15 with diurnal variation"
+      - "specific smu_string values consistently lower during certain hours"
+      - "inv_string currents show predictable daily pattern"
+      - "pv1_power or pv2_power reduced proportionally"
+    probable_causes:
+      - "new construction or vegetation shading modules"
+      - "adjacent row shading at low sun angles"
+      - "bird droppings or soiling concentrated on specific modules"
+      - "module frame self-shading from tracker misalignment"
+    recommended_actions:
+      - "conduct shading analysis with solar path diagram"
+      - "trim vegetation or remove obstructions"
+      - "clean affected modules and compare before/after current"
+      - "review tracker alignment and backtacking settings"
+      - "consider module-level power optimizers for chronic shading"
+
+  - id: smd_002
+    title: "Module Degradation Mismatch"
+    symptoms:
+      - "gradual increase in string current imbalance over months"
+      - "affected strings consistently produce 10-25% less"
+      - "mismatch does not vary significantly with time of day"
+    sensor_signals:
+      - "string_mismatch_cv > 0.10 with stable (non-diurnal) pattern"
+      - "specific smu_string values always below fleet average"
+      - "efficiency_7d_trend shows slow negative slope"
+      - "power_vs_24h_baseline consistently below 0.90"
+    probable_causes:
+      - "PID (potential induced degradation) on specific modules"
+      - "hotspot damage causing permanent cell degradation"
+      - "LID (light induced degradation) exceeding warranty spec"
+      - "snail trails indicating micro-crack progression"
+    recommended_actions:
+      - "perform IV curve trace on underperforming strings"
+      - "conduct electroluminescence (EL) imaging on suspect modules"
+      - "measure insulation resistance to ground for PID detection"
+      - "file warranty claim if degradation exceeds manufacturer spec"
+      - "plan module replacement for severely degraded units"
+
+  - id: smd_003
+    title: "Bypass Diode Failure"
+    symptoms:
+      - "one string shows step-change current drop of ~33%"
+      - "current loss corresponds to one sub-string (typically 20-24 cells)"
+      - "junction box on affected module may be abnormally hot"
+    sensor_signals:
+      - "specific smu_string drops by ~30% suddenly"
+      - "string_mismatch_cv spikes sharply and remains elevated"
+      - "no correlation with shading or weather changes"
+    probable_causes:
+      - "bypass diode short circuit or open circuit"
+      - "lightning strike damage to diode"
+      - "manufacturing defect in junction box"
+      - "thermal cycling fatigue on diode solder joint"
+    recommended_actions:
+      - "identify affected module using IR thermography"
+      - "test bypass diodes with forward voltage measurement"
+      - "replace junction box or module if diode is failed"
+      - "install surge protection if lightning suspected"
+
+  - id: smd_004
+    title: "Wiring and Connection Issues"
+    symptoms:
+      - "intermittent string current fluctuations"
+      - "string current drops under load but recovers at low power"
+      - "possible burning smell from combiner box"
+    sensor_signals:
+      - "smu_string values showing erratic noise patterns"
+      - "inv_string readings may not match smu readings"
+      - "string_mismatch_cv shows high variance (not stable)"
+    probable_causes:
+      - "loose MC4 connector with high contact resistance"
+      - "corroded combiner box fuse holder"
+      - "undersized or damaged DC cable"
+      - "water ingress in junction box or combiner"
+    recommended_actions:
+      - "perform IR scan of all connectors and combiner boxes"
+      - "re-torque all MC4 connectors to specification"
+      - "replace corroded fuse holders and fuses"
+      - "check cable sizing against current ratings"
+      - "seal junction boxes and combiner entries against moisture"

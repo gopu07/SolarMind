@@ -53,6 +53,18 @@ OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "")
 
 # ── RAG / ChromaDB ───────────────────────────────────────────────────
 CHROMA_PERSIST_DIR: Path = PROJECT_ROOT / "rag" / "chroma_store"
+KNOWLEDGE_BASE_DIR: Path = PROJECT_ROOT / "rag" / "knowledge_base"
+
+# ── RAG Advanced Pipeline ────────────────────────────────────────────
+RAG_FUSION_WEIGHTS: Dict[str, float] = {
+    "vector": 0.40,
+    "bm25": 0.25,
+    "recency": 0.15,
+    "risk": 0.20,
+}
+RAG_MULTI_QUERY_COUNT: int = 3          # semantic query expansions
+RAG_RERANK_TOP_K: int = 15             # candidates fed to reranker
+RAG_FINAL_TOP_K: int = 5              # results returned after reranking
 
 # ── API / Auth ───────────────────────────────────────────────────────
 JWT_SECRET: str = os.getenv("JWT_SECRET", "change-me-in-production")

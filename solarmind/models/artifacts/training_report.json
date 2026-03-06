@@ -1,161 +1,160 @@
 {
-  "pr_auc": 0.3148,
-  "roc_auc": 0.9851,
-  "f1_at_0_5": 0.3088,
-  "business_threshold": 0.5565,
+  "macro_f1": 0.7874,
+  "roc_auc": 0.0,
+  "business_threshold": 0.5,
   "cv_fold_metrics": [
     {
       "fold": 1,
-      "pr_auc": 0.5487745129584595,
-      "roc_auc": 0.9471962587186054,
-      "best_iteration": 72
+      "macro_f1": 0.20932564773340667,
+      "roc_auc": 0.0,
+      "best_iteration": 300
     },
     {
       "fold": 2,
-      "pr_auc": 0.29018322707428534,
-      "roc_auc": 0.9483919817300903,
-      "best_iteration": 27
+      "macro_f1": 0.782850466488866,
+      "roc_auc": 0.0,
+      "best_iteration": 300
     },
     {
       "fold": 3,
-      "pr_auc": 0.3981347807493467,
-      "roc_auc": 0.976017001721919,
-      "best_iteration": 1
+      "macro_f1": 0.8510955115281041,
+      "roc_auc": 0.0,
+      "best_iteration": 300
     },
     {
       "fold": 4,
-      "pr_auc": 0.706916368884552,
-      "roc_auc": 0.9863404730132292,
-      "best_iteration": 285
+      "macro_f1": 0.7452085110440164,
+      "roc_auc": 0.0,
+      "best_iteration": 300
     },
     {
       "fold": 5,
-      "pr_auc": 0.24943315603172428,
-      "roc_auc": 0.9852435897740599,
-      "best_iteration": 18
+      "macro_f1": 0.8201491351524706,
+      "roc_auc": 0.0,
+      "best_iteration": 300
     }
   ],
-  "mean_best_iteration": 80,
+  "mean_best_iteration": 300,
   "top_features": [
     {
-      "feature": "pv2_voltage",
-      "importance": 0.33063969016075134
-    },
-    {
-      "feature": "pv2_current",
-      "importance": 0.2627938985824585
-    },
-    {
-      "feature": "meter_pf",
-      "importance": 0.11890116333961487
-    },
-    {
-      "feature": "pv1_current",
-      "importance": 0.11102008819580078
-    },
-    {
-      "feature": "frequency_deviation",
-      "importance": 0.10972598940134048
-    },
-    {
-      "feature": "inverter_limit_percent",
-      "importance": 0.005242763552814722
-    },
-    {
-      "feature": "power_vs_24h_baseline",
-      "importance": 0.004507993347942829
-    },
-    {
       "feature": "day_of_year_sin",
-      "importance": 0.0032220955472439528
-    },
-    {
-      "feature": "temp_rolling_mean_24h",
-      "importance": 0.0029154387302696705
-    },
-    {
-      "feature": "temp_rolling_max_24h",
-      "importance": 0.002788915066048503
-    },
-    {
-      "feature": "efficiency_volatility_24h",
-      "importance": 0.00272573996335268
+      "importance": 754.078747891015
     },
     {
       "feature": "day_of_year_cos",
-      "importance": 0.00269717862829566
+      "importance": 610.0713501767472
     },
     {
-      "feature": "meter_active_power",
-      "importance": 0.002657083095982671
+      "feature": "temp_rolling_max_24h",
+      "importance": 606.7052201703003
+    },
+    {
+      "feature": "temp_rolling_mean_24h",
+      "importance": 527.3726239587863
+    },
+    {
+      "feature": "mppt_power_ratio_24h",
+      "importance": 432.0002205406393
+    },
+    {
+      "feature": "power_trend_24h",
+      "importance": 226.67955908794684
+    },
+    {
+      "feature": "power_vs_24h_baseline",
+      "importance": 166.3389942247246
+    },
+    {
+      "feature": "temp_rolling_std_12h",
+      "importance": 134.00940457552815
+    },
+    {
+      "feature": "temperature_mean_6h",
+      "importance": 117.34049325924961
     },
     {
       "feature": "rel_temp_to_plant",
-      "importance": 0.002554054372012615
+      "importance": 114.66999489777908
     },
     {
-      "feature": "pv1_power",
-      "importance": 0.002514550229534507
-    },
-    {
-      "feature": "month_cos",
-      "importance": 0.002480251481756568
-    },
-    {
-      "feature": "month_sin",
-      "importance": 0.0024575884453952312
-    },
-    {
-      "feature": "conversion_efficiency",
-      "importance": 0.002291918732225895
+      "feature": "power_trend_12h",
+      "importance": 104.0084946545483
     },
     {
       "feature": "pv1_power_lag_288",
-      "importance": 0.0019806018099188805
+      "importance": 103.67182554056888
     },
     {
-      "feature": "meter_v_y",
-      "importance": 0.0018767047440633178
+      "feature": "hour_sin",
+      "importance": 98.00365575189845
     },
     {
-      "feature": "meter_v_b",
-      "importance": 0.0018439702689647675
+      "feature": "temperature_gradient_6h",
+      "importance": 94.67097743818682
     },
     {
-      "feature": "rel_power_to_plant",
-      "importance": 0.0017908347072079778
+      "feature": "power_rank_within_plant",
+      "importance": 89.33444278032556
     },
     {
-      "feature": "meter_v_r",
-      "importance": 0.0016930276760831475
+      "feature": "relative_power",
+      "importance": 86.66712177918369
     },
     {
-      "feature": "mppt_imbalance_ratio",
-      "importance": 0.001681439927779138
+      "feature": "temperature_rank_within_plant",
+      "importance": 81.33620629031364
     },
     {
-      "feature": "grid_voltage_disturbances_24h",
-      "importance": 0.0015848492039367557
+      "feature": "inverter_temperature",
+      "importance": 78.00288141508489
     },
     {
-      "feature": "efficiency_vs_plant_avg",
-      "importance": 0.001519720652140677
+      "feature": "temp_vs_30d_percentile",
+      "importance": 76.67087419219568
+    },
+    {
+      "feature": "hour_cos",
+      "importance": 74.67209094128343
     },
     {
       "feature": "power_ramp_rate",
-      "importance": 0.0013888838002458215
+      "importance": 71.33696711524755
     },
     {
-      "feature": "pv2_power",
-      "importance": 0.0013702376745641232
+      "feature": "pv1_power",
+      "importance": 66.04311487485076
     },
     {
-      "feature": "meter_freq",
-      "importance": 0.0012677015038207173
+      "feature": "pv1_power_lag_1",
+      "importance": 48.66901737299806
     },
     {
       "feature": "pv1_power_lag_3",
-      "importance": 0.0011918828822672367
+      "importance": 45.334794142895326
+    },
+    {
+      "feature": "mppt_imbalance_ratio",
+      "importance": 42.0149896889925
+    },
+    {
+      "feature": "temp_power_interaction",
+      "importance": 41.34434844386747
+    },
+    {
+      "feature": "thermal_gradient",
+      "importance": 40.66753159545603
+    },
+    {
+      "feature": "month_cos",
+      "importance": 31.33941229534521
+    },
+    {
+      "feature": "month_sin",
+      "importance": 28.688821534604326
+    },
+    {
+      "feature": "daylight_hours_indicator",
+      "importance": 8.001742476172609
     }
   ]
 }

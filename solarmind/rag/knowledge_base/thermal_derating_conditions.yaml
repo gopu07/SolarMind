@@ -1,0 +1,89 @@
+concept: thermal_derating_conditions
+category: performance_degradation
+description: >
+  Temperature-induced power derating scenarios where inverter output is curtailed
+  to protect power electronics from thermal damage.
+
+chunks:
+  - id: tdc_001
+    title: "Active Power Derating"
+    symptoms:
+      - "inverter output clamped below nameplate capacity"
+      - "power plateau during peak solar hours despite high irradiance"
+      - "derating persists for hours until temperature drops"
+    sensor_signals:
+      - "inverter_temperature > 70°C sustained"
+      - "inverter_limit_percent < 100% (proportional to overtemp)"
+      - "meter_active_power flat-lined below rated capacity"
+      - "pv1_power + pv2_power available exceeds inverter output"
+    probable_causes:
+      - "ambient temperature exceeding inverter design limits"
+      - "cooling system partial failure (fan degraded)"
+      - "excessive dust on ventilation filters"
+      - "inverter overloaded (DC/AC ratio > 1.3)"
+    recommended_actions:
+      - "review cooling system operation immediately"
+      - "clean ventilation filters and air passages"
+      - "check ambient temperature at inverter inlet"
+      - "consider reducing DC/AC ratio by disconnecting strings"
+      - "install supplemental cooling if ambient is the root cause"
+
+  - id: tdc_002
+    title: "Frequency Derating"
+    symptoms:
+      - "power reduction coinciding with grid frequency rise"
+      - "inverter reduces output at grid freq > 50.2Hz"
+      - "power recovers when frequency returns to normal"
+    sensor_signals:
+      - "meter_freq > 50.2 Hz"
+      - "meter_active_power reducing proportionally to freq deviation"
+      - "inverter_op_state remains in RUN but output is curtailed"
+    probable_causes:
+      - "grid frequency regulation (mandatory by grid code)"
+      - "excess generation on local network"
+      - "utility requesting demand response"
+    recommended_actions:
+      - "verify inverter frequency droop settings match grid code"
+      - "contact utility if frequency excursions are frequent"
+      - "install frequency logging to quantify energy loss"
+      - "this is normal grid-compliant behavior — document for reporting"
+
+  - id: tdc_003
+    title: "Voltage Derating"
+    symptoms:
+      - "power curtailment when grid voltage is elevated"
+      - "inverter reduces reactive power output first, then active"
+      - "voltage consistently above 1.05 p.u. at PCC"
+    sensor_signals:
+      - "meter_v_r or meter_v_y or meter_v_b > 253V (for 240V nominal)"
+      - "meter_active_power less than expected for available irradiance"
+      - "meter_pf may be leading (absorbing reactive power)"
+    probable_causes:
+      - "grid voltage elevated at PCC due to high local generation"
+      - "transformer ratio not optimized for solar plant"
+      - "long feeder line with insufficient regulation"
+    recommended_actions:
+      - "review transformer tap settings — may need adjustment"
+      - "configure inverter volt-watt and volt-VAr response curves"
+      - "coordinate with utility on voltage regulation"
+      - "install auto-tap-changer if voltage swings are persistent"
+
+  - id: tdc_004
+    title: "Overnight Thermal Recovery Failure"
+    symptoms:
+      - "morning startup temperatures already elevated (> 45°C)"
+      - "inverter never fully cools overnight"
+      - "cumulative thermal stress reducing IGBT lifetime"
+    sensor_signals:
+      - "inverter_temperature at sunrise > 40°C (should be near ambient)"
+      - "temp_rolling_mean_24h consistently above fleet average"
+      - "temperature does not drop below 35°C even in nighttime data"
+    probable_causes:
+      - "inverter room retaining heat overnight (poor ventilation)"
+      - "inverter placed near external heat source (e.g., transformer)"
+      - "fan running continuously but air recirculating (blocked exhaust)"
+    recommended_actions:
+      - "verify exhaust path from inverter room is unobstructed"
+      - "install temperature sensor at air intake for monitoring"
+      - "ensure night-time ventilation is active"
+      - "relocate inverter if adjacent to persistent heat source"

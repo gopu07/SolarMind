@@ -30,6 +30,7 @@ if str(_project_root) not in sys.path:
 
 import config  # noqa: E402
 from features.pipeline import FEATURE_COLUMNS, compute_features_streaming  # noqa: E402
+from models.ensemble import TreeEnsemble  # noqa: E402
 
 log = structlog.get_logger(__name__)
 
@@ -38,6 +39,7 @@ log = structlog.get_logger(__name__)
 # Model loading (cached at module level)
 # =====================================================================
 _cached_model = None
+_cached_iso_model = None
 _cached_threshold: float = 0.5
 _cached_base_booster: Optional[xgb.Booster] = None
 
@@ -50,9 +52,10 @@ def _load_model():
     Raises:
         FileNotFoundError: If model artifacts are missing.
     """
-    global _cached_model, _cached_threshold, _cached_base_booster
+    global _cached_model, _cached_iso_model, _cached_threshold, _cached_base_booster
 
     model_path = config.ARTIFACTS_DIR / "model.pkl"
+    iso_model_path = config.ARTIFACTS_DIR / "isolation_forest.pkl"
     threshold_path = config.ARTIFACTS_DIR / "threshold.json"
 
     if not model_path.exists():
@@ -60,6 +63,10 @@ def _load_model():
 
     with open(model_path, "rb") as f:
         _cached_model = pickle.load(f)
+        
+    if iso_model_path.exists():
+        with open(iso_model_path, "rb") as f:
+            _cached_iso_model = pickle.load(f)
 
     if threshold_path.exists():
         with open(threshold_path, "r") as f:
@@ -92,6 +99,15 @@ def get_model():
         _load_model()
     return _cached_model
 
+def get_iso_model():
+    """Return the cached isolation forest model, loading if needed.
+    
+    Returns:
+        IsolationForest model instance.
+    """
+    if _cached_iso_model is None and _cached_model is None:
+        _load_model()
+    return _cached_iso_model
 
 def get_base_booster() -> xgb.Booster:
     """Return the cached XGBoost base booster, loading if needed.
@@ -208,14 +224,51 @@ def predict_inverter(
     for col in available_features:
         X_now[col] = pd.to_numeric(X_now[col], errors='coerce')
 
-    risk_score_now = float(model.predict_proba(X_now)[:, 1][0])
-    risk_level = config.risk_level_from_score(risk_score_now)
+    # Impute missing values with 0 for Isolation Forest (training used median but 0 is safe enough here)
+    X_iso = X_now.fillna(0)
+    iso_model = get_iso_model()
+    
+    # Calculate supervised risk scores for multiclass
+    raw_probas = model.predict_proba(X_now)[0]
+    predicted_class = int(np.argmax(raw_probas))
+    
+    # 0=Normal, 1=Thermal, 2=String, 3=Grid, 4=Cooling
+    failure_mapping = {
+        0: "normal_operation",
+        1: "thermal_issue",
+        2: "string_mismatch",
+        3: "grid_instability",
+        4: "cooling_system_failure"
+    }
+    predicted_failure_type = failure_mapping.get(predicted_class, "unknown")
+    
+    # Risk score is probability of failure (1.0 - P(Normal))
+    risk_score_now = float(1.0 - raw_probas[0])
+    if iso_model is not None:
+        # decision_function returns anomaly score: lower is more anomalous
+        # Normalize roughly to a 0-1 scale where 1 is highly anomalous
+        iso_score = iso_model.decision_function(X_iso)[0]
+        # In sklearn IF, decision_function < 0 is an anomaly. Range is usually [-0.5, 0.5]
+        # Map to 0-1 probability scale roughly
+        anomaly_score = max(0.0, min(1.0, 0.5 - iso_score))
+    else:
+        anomaly_score = 0.0
+        
+    final_risk_score = 0.7 * risk_score_now + 0.3 * anomaly_score
+    risk_level = config.risk_level_from_score(final_risk_score)
 
     # SHAP for T using native XGBoost pred_contribs
     dmat_now = xgb.DMatrix(X_now)
     contribs_now = booster.predict(dmat_now, pred_contribs=True)
-    # contribs shape: (n_samples, n_features + 1), where last col is bias
-    shap_now_arr = contribs_now[0, :-1]
+    # contribs shape depends on XGBoost. Usually (n_samples, n_features+1, n_classes) for multiclass
+    if len(contribs_now.shape) == 3:
+        if contribs_now.shape[-1] == 5:
+            shap_now_arr = contribs_now[0, :-1, predicted_class]
+        else: # (n_samples, n_classes, n_features+1)
+            shap_now_arr = contribs_now[0, predicted_class, :-1]
+    else:
+        # Fallback if binary or different shape
+        shap_now_arr = contribs_now[0, :-1]
 
     shap_now_dict = dict(zip(available_features, shap_now_arr))
     shap_top5 = sorted(
@@ -235,11 +288,17 @@ def predict_inverter(
                 X_24h = feat_24h[available_features].copy()
                 for col in available_features:
                     X_24h[col] = pd.to_numeric(X_24h[col], errors='coerce')
-                risk_score_24h = float(model.predict_proba(X_24h)[:, 1][0])
+                risk_score_24h = float(1.0 - model.predict_proba(X_24h)[0, 0])
 
                 dmat_24h = xgb.DMatrix(X_24h)
                 contribs_24h = booster.predict(dmat_24h, pred_contribs=True)
-                shap_24h_arr = contribs_24h[0, :-1]
+                if len(contribs_24h.shape) == 3:
+                    if contribs_24h.shape[-1] == 5:
+                        shap_24h_arr = contribs_24h[0, :-1, predicted_class]
+                    else:
+                        shap_24h_arr = contribs_24h[0, predicted_class, :-1]
+                else:
+                    shap_24h_arr = contribs_24h[0, :-1]
 
                 delta_shap_arr = shap_now_arr - shap_24h_arr
                 delta_dict = dict(zip(available_features, delta_shap_arr))
@@ -247,6 +306,37 @@ def predict_inverter(
                     delta_dict.items(), key=lambda x: abs(x[1]), reverse=True
                 )[:5]
                 delta_shap_available = True
+
+    # ── LIME Explainability ─────────────────────────────────────────
+    lime_top5 = []
+    try:
+        import lime.lime_tabular
+        # Need a background sample. Since predict_inverter loaded recent telemetry, use it (or part of it)
+        bg_df = _assemble_feature_vector(telemetry, inverter_id)
+        if bg_df is None:
+            # Fallback to X_now
+            bg_df = X_now
+            
+        bg_data = bg_df[available_features].fillna(0).values
+        # Just use max 20 rows to initialize it fast
+        if len(bg_data) > 20:
+            bg_data = bg_data[-20:]
+            
+        explainer = lime.lime_tabular.LimeTabularExplainer(
+            bg_data,
+            feature_names=available_features,
+            class_names=[failure_mapping[i] for i in range(5)],
+            mode='classification'
+        )
+        def predict_fn(x):
+            df_x = pd.DataFrame(x, columns=available_features).fillna(0)
+            return model.predict_proba(df_x)
+            
+        exp = explainer.explain_instance(X_now.iloc[0].values, predict_fn, num_features=5, top_labels=5)
+        lime_list = exp.as_list(label=predicted_class)
+        lime_top5 = [{"feature": f, "lime_weight": round(float(w), 6)} for f, w in lime_list]
+    except Exception as e:
+        log.warning("lime_extraction_failed", error=str(e))
 
     # ── Resolve plant/block from telemetry ──────────────────────────
     plant_id = str(telemetry["plant_id"].iloc[-1]) if "plant_id" in telemetry.columns else "UNKNOWN"
@@ -256,10 +346,14 @@ def predict_inverter(
         "inverter_id": inverter_id,
         "plant_id": plant_id,
         "block_id": block_id,
+        "predicted_failure_type": predicted_failure_type,
         "risk_score": round(risk_score_now, 4),
+        "final_risk_score": round(final_risk_score, 4),
+        "anomaly_score": round(anomaly_score, 4),
         "risk_level": risk_level,
         "shap_top5": [{"feature": f, "shap_value": round(float(v), 6)} for f, v in shap_top5],
         "shap_now": {k: round(float(v), 6) for k, v in shap_now_dict.items()},
+        "lime_top5": lime_top5,
         "delta_shap_available": delta_shap_available,
         "delta_shap_top5": (
             [{"feature": f, "delta_shap": round(float(v), 6)} for f, v in delta_shap_top5]
@@ -295,10 +389,14 @@ def _error_result(inverter_id: str, reason: str) -> Dict[str, Any]:
         "inverter_id": inverter_id,
         "plant_id": "UNKNOWN",
         "block_id": "UNKNOWN",
+        "predicted_failure_type": "unknown",
         "risk_score": 0.0,
+        "final_risk_score": 0.0,
+        "anomaly_score": 0.0,
         "risk_level": "LOW",
         "shap_top5": [],
         "shap_now": {},
+        "lime_top5": [],
         "delta_shap_available": False,
         "delta_shap_top5": None,
         "risk_score_24h": None,

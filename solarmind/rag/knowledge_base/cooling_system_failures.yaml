@@ -1,0 +1,72 @@
+concept: cooling_system_failures
+category: thermal_management
+description: >
+  Thermal management failure modes for solar inverters including fan failures,
+  heatsink degradation, and ambient temperature impacts.
+
+chunks:
+  - id: csf_001
+    title: "Fan Failure — Complete Stop"
+    symptoms:
+      - "inverter temperature rising steadily above 65°C"
+      - "thermal derating activating during moderate ambient temps"
+      - "no audible fan noise from inverter cabinet"
+    sensor_signals:
+      - "inverter_temperature climbing >2°C per 15-min interval"
+      - "inverter_temperature exceeding 75°C while ambient < 35°C"
+      - "meter_active_power declining as temperature rises (derating)"
+      - "inverter_limit_percent dropping below 100%"
+    probable_causes:
+      - "fan motor bearing seizure"
+      - "fan control circuit failure"
+      - "dust accumulation blocking fan blades"
+      - "power supply failure to fan circuit"
+    recommended_actions:
+      - "immediate visual inspection of internal cooling fans"
+      - "clean dust filters and fan blade assembly"
+      - "measure fan motor resistance — should be 20-100 ohms"
+      - "replace fan assembly if motor is seized"
+      - "install fan status monitoring sensor for early warning"
+
+  - id: csf_002
+    title: "Heatsink Degradation"
+    symptoms:
+      - "gradually increasing operating temperature over weeks"
+      - "temperature differential between similar inverters > 10°C"
+      - "thermal derating occurring earlier in the day"
+    sensor_signals:
+      - "inverter_temperature trending upward over 30-day rolling average"
+      - "temp_rolling_mean_24h consistently above fleet average"
+      - "efficiency_7d_trend shows negative slope correlated with temp rise"
+    probable_causes:
+      - "thermal paste between IGBT and heatsink has dried out"
+      - "heatsink fins clogged with dust or debris"
+      - "air intake filter blocked restricting airflow"
+      - "ambient temperature increase from nearby heat source"
+    recommended_actions:
+      - "clean heatsink fins with compressed air"
+      - "replace thermal interface material (TIM) between IGBT and heatsink"
+      - "verify air intake and exhaust paths are unobstructed"
+      - "check for new heat sources near inverter installation"
+      - "compare thermal profile with adjacent identical inverters"
+
+  - id: csf_003
+    title: "Ambient Overtemperature"
+    symptoms:
+      - "all inverters in same block showing elevated temperatures"
+      - "thermal derating coinciding with peak ambient temps"
+      - "power curtailment during afternoon hours"
+    sensor_signals:
+      - "inverter_temperature > 80°C across multiple inverters simultaneously"
+      - "inverter_limit_percent < 80% during 12:00-16:00 hours"
+      - "meter_active_power showing systematic afternoon dip"
+    probable_causes:
+      - "inverter room ventilation inadequate for summer temps"
+      - "direct solar radiation on inverter enclosure"
+      - "HVAC system in inverter room malfunctioning"
+      - "design capacity exceeded by ambient conditions"
+    recommended_actions:
+      - "install additional ventilation or exhaust fans in inverter room"
+      - "apply reflective coating or sunshade to inverter enclosures"
+      - "check and service HVAC system"
+      - "consider adding forced-air cooling for peak summer months"

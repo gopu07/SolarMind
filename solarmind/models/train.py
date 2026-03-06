@@ -22,13 +22,12 @@ import optuna
 import shap
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import (
-    average_precision_score,
     f1_score,
-    precision_recall_curve,
     precision_score,
     recall_score,
     roc_auc_score,
 )
+from sklearn.ensemble import IsolationForest
 from xgboost import XGBClassifier
 import lightgbm as lgb
 from catboost import CatBoostClassifier
@@ -95,77 +94,10 @@ def walk_forward_splits(
 
 
 def _find_business_threshold(y_true: np.ndarray, y_prob: np.ndarray) -> float:
-    # Maximize F1 instead of F0.5
-    precisions, recalls, thresholds = precision_recall_curve(y_true, y_prob)
-    f1s = np.where(
-        (precisions[:-1] + recalls[:-1]) > 0,
-        2 * (precisions[:-1] * recalls[:-1]) / (precisions[:-1] + recalls[:-1]),
-        0.0,
-    )
-    if len(f1s) == 0:
-        return 0.5
-    best_idx = np.argmax(f1s)
-    return float(thresholds[best_idx])
+    # Not used for multiclass strictly, but we return a default to satisfy the signature if needed
+    return 0.5
     
-class TreeEnsemble:
-    def __init__(self, xgb_params: Dict[str, Any], scale_pos_weight: float, random_state: int = 42):
-        self.xgb = XGBClassifier(
-            **xgb_params,
-            n_estimators=300,
-            objective="binary:logistic",
-            scale_pos_weight=scale_pos_weight,
-            eval_metric="aucpr",
-            random_state=random_state,
-            verbosity=0,
-        )
-        self.lgb = lgb.LGBMClassifier(
-            n_estimators=250,
-            scale_pos_weight=scale_pos_weight,
-            random_state=random_state,
-            verbose=-1,
-        )
-        # For CatBoost, auto_class_weights="Balanced" handles imbalance
-        self.cat = CatBoostClassifier(
-            iterations=250,
-            auto_class_weights="Balanced",
-            random_seed=random_state,
-            verbose=0,
-        )
-        self.classes_ = np.array([0, 1])
-
-    def fit(self, X_train: pd.DataFrame, y_train: np.ndarray, eval_set: List[Tuple[pd.DataFrame, np.ndarray]] = None, verbose: bool = False):
-        if eval_set is not None:
-            self.xgb.fit(X_train, y_train, eval_set=eval_set, verbose=verbose)
-            self.lgb.fit(X_train, y_train, eval_set=eval_set, callbacks=[lgb.early_stopping(50, verbose=False)])
-            # CatBoost expects eval_set to be just a tuple or list of tuples
-            self.cat.fit(X_train, y_train, eval_set=eval_set, early_stopping_rounds=50, verbose=verbose)
-        else:
-            self.xgb.fit(X_train, y_train, verbose=verbose)
-            self.lgb.fit(X_train, y_train)
-            self.cat.fit(X_train, y_train, verbose=verbose)
-
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        p_xgb = self.xgb.predict_proba(X)[:, 1]
-        p_lgb = self.lgb.predict_proba(X)[:, 1]
-        p_cat = self.cat.predict_proba(X)[:, 1]
-        # Weighted ensemble
-        final_p = 0.5 * p_xgb + 0.3 * p_lgb + 0.2 * p_cat
-        res = np.zeros((len(X), 2))
-        res[:, 1] = final_p
-        res[:, 0] = 1.0 - final_p
-        return res
-        
-    @property
-    def feature_importances_(self) -> np.ndarray:
-        # Simple average of importances. Note: scales might differ, but it gives a rough idea.
-        xgb_imp = self.xgb.feature_importances_
-        lgb_imp = self.lgb.feature_importances_
-        if lgb_imp.sum() > 0:
-            lgb_imp = lgb_imp / lgb_imp.sum()
-        cat_imp = self.cat.feature_importances_
-        if cat_imp.sum() > 0:
-            cat_imp = cat_imp / cat_imp.sum()
-        return (xgb_imp + lgb_imp + cat_imp) / 3.0
+from models.ensemble import TreeEnsemble  # noqa: E402
 
 
 def _calibration_curve_decile(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> List[Dict[str, float]]:
@@ -237,8 +169,9 @@ def train(include_inferred: bool = False) -> Dict[str, Any]:
             "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
             "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
             "n_estimators": 800,
-            "objective": "binary:logistic",
-            "eval_metric": "aucpr",
+            "objective": "multi:softprob",
+            "num_class": 5,
+            "eval_metric": "mlogloss",
             "random_state": 42,
             "verbosity": 0,
         }
@@ -251,12 +184,12 @@ def train(include_inferred: bool = False) -> Dict[str, Any]:
             if y_tr.sum() == 0 or y_v.sum() == 0:
                 continue
                 
-            spw = (y_tr==0).sum() / max(y_tr.sum(), 1)    
-            model = XGBClassifier(**params, scale_pos_weight=spw, early_stopping_rounds=30)
+            model = XGBClassifier(**params, early_stopping_rounds=30)
             model.fit(X_tr, y_tr, eval_set=[(X_v, y_v)], verbose=False)
             
-            y_prob = model.predict_proba(X_v)[:, 1]
-            scores.append(average_precision_score(y_v, y_prob))
+            # For multiclass, optuna tuning metric: macro F1
+            y_pred = np.argmax(model.predict_proba(X_v), axis=1)
+            scores.append(f1_score(y_v, y_pred, average="macro"))
             
         return np.mean(scores) if scores else 0.0
 
@@ -276,22 +209,26 @@ def train(include_inferred: bool = False) -> Dict[str, Any]:
         if y_train.sum() == 0 or y_val.sum() == 0:
             continue
 
-        spw_cv = (y_train==0).sum() / max(y_train.sum(), 1)
-        model = TreeEnsemble(best_params, scale_pos_weight=spw_cv, random_state=42+fold_num)
+        model = TreeEnsemble(best_params, random_state=42+fold_num)
         model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
         # We track XGB's best iteration (falling back to n_estimators)
         best_iter = getattr(model.xgb, "best_iteration", model.xgb.n_estimators)
         best_iterations.append(best_iter)
 
-        y_prob = model.predict_proba(X_val)[:, 1]
-        if y_val.sum() > 0:
-            pr_auc = average_precision_score(y_val, y_prob)
-            roc = roc_auc_score(y_val, y_prob)
+        # Predict returns Nx5 array of probabilities
+        y_prob = model.predict_proba(X_val)
+        y_pred = np.argmax(y_prob, axis=1)
+        if len(np.unique(y_val)) > 1:
+            macro_f1 = f1_score(y_val, y_pred, average="macro")
+            try:
+                roc = roc_auc_score(y_val, y_prob, multi_class="ovr")
+            except ValueError:
+                roc = 0.0
         else:
-            pr_auc, roc = 0.0, 0.0
+            macro_f1, roc = 0.0, 0.0
 
-        fold_metrics.append({"fold": fold_num, "pr_auc": pr_auc, "roc_auc": roc, "best_iteration": best_iter})
-        log.info("cv_fold_complete", fold=fold_num, pr_auc=f"{pr_auc:.4f}")
+        fold_metrics.append({"fold": fold_num, "macro_f1": macro_f1, "roc_auc": roc, "best_iteration": best_iter})
+        log.info("cv_fold_complete", fold=fold_num, macro_f1=f"{macro_f1:.4f}")
 
     # ── 3. Retrain on Full CV Data ──────────────────────────────────
     mean_best_iter = max(int(np.mean(best_iterations)) if best_iterations else 50, 20)
@@ -313,12 +250,11 @@ def train(include_inferred: bool = False) -> Dict[str, Any]:
         sys.exit(1)
 
     spw_full = (y_train_full==0).sum() / max(y_train_full.sum(), 1)
-    
     # Let's adjust XGB params to use mean_best_iter
     best_params_final = best_params.copy()
     
     # We create TreeEnsemble, but we must override xgb estimators
-    final_model = TreeEnsemble(best_params_final, scale_pos_weight=spw_full, random_state=42)
+    final_model = TreeEnsemble(best_params_final, random_state=42)
     final_model.xgb.set_params(n_estimators=mean_best_iter)
     final_model.fit(X_train_full, y_train_full, verbose=False)
 
@@ -352,29 +288,56 @@ def train(include_inferred: bool = False) -> Dict[str, Any]:
     top_30_features = importance_df.head(30).to_dict("records")
 
     # ── 6. Evaluate ─────────────────────────────────────────────────
-    if len(X_test) == 0 or y_test.sum() == 0:
-        log.warning("test_set_empty_or_no_positives")
-        report_dict = {"pr_auc": 0.0, "roc_auc": 0.0, "f1_at_0_5": 0.0, "business_threshold": 0.5, "top_features": top_30_features}
+    if len(X_test) == 0:
+        log.warning("test_set_empty")
+        report_dict = {"macro_f1": 0.0, "roc_auc": 0.0, "business_threshold": 0.5, "top_features": top_30_features}
     else:
-        y_prob_test = calibrated_model.predict_proba(X_test)[:, 1]
-        pr_auc_test = average_precision_score(y_test, y_prob_test)
-        roc_auc_test = roc_auc_score(y_test, y_prob_test)
-        biz_threshold = _find_business_threshold(y_test, y_prob_test)
-        f1_test = f1_score(y_test, (y_prob_test >= biz_threshold).astype(int))
-        recall_test = recall_score(y_test, (y_prob_test >= biz_threshold).astype(int))
+        y_prob_test = calibrated_model.predict_proba(X_test)
+        y_pred_test = np.argmax(y_prob_test, axis=1)
+        try:
+            roc_auc_test = roc_auc_score(y_test, y_prob_test, multi_class="ovr")
+        except ValueError:
+            roc_auc_test = 0.0
+            
+        f1_test = f1_score(y_test, y_pred_test, average="macro")
 
         report_dict = {
-            "pr_auc": round(pr_auc_test, 4),
+            "macro_f1": round(f1_test, 4),
             "roc_auc": round(roc_auc_test, 4),
-            "f1_score": round(f1_test, 4),
-            "recall": round(recall_test, 4),
-            "business_threshold": round(biz_threshold, 4),
+            "business_threshold": 0.5,
             "cv_fold_metrics": fold_metrics,
             "mean_best_iteration": mean_best_iter,
             "top_features": top_30_features,
         }
 
-        log.info("evaluation_complete", pr_auc=report_dict["pr_auc"], roc_auc=report_dict["roc_auc"])
+        log.info("evaluation_complete", macro_f1=report_dict["macro_f1"], roc_auc=report_dict["roc_auc"])
+
+    # ── 6.5. Train Unsupervised Anomaly Model ────────────────────────
+    log.info("training_isolation_forest")
+    
+    # User Fix 5: Limit IF input features to stable signals
+    iso_features = [
+        "inverter_temperature", 
+        "pv1_power", 
+        "conversion_efficiency", 
+        "string_current_variance", 
+        "pv1_voltage"
+    ]
+    # Filter to what is actually available in the processing dataframe
+    available_iso_features = [f for f in iso_features if f in X_train_full.columns]
+    
+    # Impute NaNs with median since IsolationForest doesn't natively support them like XGBoost
+    X_train_imputed = X_train_full[available_iso_features].fillna(X_train_full[available_iso_features].median())
+    
+    # Train Isolation Forest
+    iso_forest = IsolationForest(
+        n_estimators=100,
+        contamination=0.05, # assume 5% of historical data is anomalous
+        random_state=42,
+        n_jobs=-1
+    )
+    iso_forest.fit(X_train_imputed)
+    log.info("isolation_forest_trained")
 
     # ── 7. Save ─────────────────────────────────────────────────────
     config.ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -382,6 +345,8 @@ def train(include_inferred: bool = False) -> Dict[str, Any]:
         pickle.dump(calibrated_model, f)
     with open(config.ARTIFACTS_DIR / "base_model.pkl", "wb") as f:
         pickle.dump(final_model, f)
+    with open(config.ARTIFACTS_DIR / "isolation_forest.pkl", "wb") as f:
+        pickle.dump(iso_forest, f)
     with open(config.ARTIFACTS_DIR / "threshold.json", "w") as f:
         json.dump({"business_threshold": report_dict.get("business_threshold", 0.5)}, f, indent=2)
     with open(config.ARTIFACTS_DIR / "feature_columns.json", "w") as f:
@@ -402,11 +367,8 @@ def main() -> None:
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE")
     print("=" * 60)
-    print(f"  PR-AUC:            {report['pr_auc']}")
-    print(f"  ROC-AUC:           {report['roc_auc']}")
-    print(f"  F1 Score:          {report['f1_score']}")
-    print(f"  Recall:            {report['recall']}")
-    print(f"  Business threshold:{report['business_threshold']}")
+    print(f"  Macro F1:          {report['macro_f1']}")
+    print(f"  Multiclass ROC-AUC:{report['roc_auc']}")
     if "top_features" in report:
         print("\n  Top 5 Features by SHAP:")
         for feat in report["top_features"][:5]:

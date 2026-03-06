@@ -10,13 +10,15 @@ By unpivoting complex, multi-dimensional datalogger telemetry and applying local
 
 ### 1. Heterogeneous Ensemble Engine (Layer 3)
 - **Multi-Model Ensemble**: A weighted voting ensemble combining **XGBoost (50%)**, **LightGBM (30%)**, and **CatBoost (20%)** to maximize predictive stability and handle multivariate sensor noise.
+- **Multiclass Fault Classification**: Transitioned from binary models to a 5-class predictive system identifying: Normal, Thermal Issues, String Mismatch, Grid Instability, and Cooling Failures.
+- **Unsupervised Anomaly Detection**: Integrated **Isolation Forest** trained on stable telemetry to catch unknown failure modes, blended with supervised probabilities into a unified hybrid risk score.
 - **Calibrated Probability**: Platt scaling (sigmoid calibration) applied to the ensemble output to ensure risk scores represent true failure probabilities.
-- **Explainable AI (XAI)**: Integrated **SHAP (SHapley Additive exPlanations)** to extract granular feature contributions from the ensemble.
-- **Delta-SHAP Inference**: A temporal contrast mechanism that compares current importance vectors against T-24h baselines to detect rapid drifts in thermal or electrical state.
+- **Explainable AI (XAI)**: Integrated **SHAP** and **LIME** local surrogates to extract granular feature contributions specifically driving the *predicted class*.
 
 ### 2. Feature Engineering Pipeline (Layer 2)
 - **Physics-Derived Features**: Real-time compute of **Conversion Efficiency** and **Thermal Gradients** clip-detected for nighttime thresholds.
-- **Plant-Context Benchmarking**: Dynamic ranking of inverters (power, temperature, efficiency) against the real-time average of their respective plants to isolate local faults from global environmental variants (e.g., cloud cover).
+- **Plant-Context Benchmarking**: Dynamic ranking of inverters (power, temperature, efficiency) against the real-time average of their respective plants to isolate local faults.
+- **Temporal & Variance Features**: Deep historical context via robust rolling windows (`temperature_mean_6h`, `power_trend_24h`), `string_current_variance`, and `relative_power`.
 - **Cyclical Encoding**: Fourier transforms applied to temporal variables (`hour`, `month`, `day_of_year`) to capture solar irradiance cycles.
 
 ### 3. Generative AI & RAG (Layers 4 & 5)
@@ -69,18 +71,19 @@ graph TD
 
 ## 🔌 API Reference
 
-The backend exposes a comprehensive FastAPI suite with Bearer JWT authentication:
+The backend exposes a comprehensive FastAPI suite built strictly on **Pydantic V2**, with Bearer JWT authentication:
 
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
 | `/auth/token` | `POST` | OAuth2 authentication (admin access). |
-| `/predict` | `POST` | High-fidelity inference with narrative generation. |
+| `/health` | `GET` | System uptime, WebSocket clients, and ML model memory load status. |
+| `/model/metrics` | `GET` | Multiclass model performance metrics (Macro F1, ROC-AUC). |
+| `/predict` | `POST` | High-fidelity inference returning Multi-class predictions, Anomaly scores, and Risk blending. |
+| `/explain/{id}` | `GET` | Raw SHAP Waterfall arrays, Summary plots, and LIME weights for charting. |
 | `/query` | `POST` | RAG-powered natural language plant search. |
-| `/inverters` | `GET` | List all inverters with cached latest-state KPI. |
+| `/inverters` | `GET` | List all inverters via centralized in-memory `PlantStateManager`. |
 | `/inverters/{id}/trends` | `GET` | 48-hour trend data for dashboard charts. |
-| `/inverters/{id}/shap` | `GET` | Real-time feature importance (SHAP). |
-| `/ws/stream/{plant_id}` | `WS` | Continuous 60s/2s telemetry replay stream. |
-| `/metrics` | `GET` | Prometheus instrumentation (latencies, counts). |
+| `/ws/stream/{plant_id}` | `WS` | Continuous telemetry replay stream broadcasting stable state payloads. |
 
 ---
 

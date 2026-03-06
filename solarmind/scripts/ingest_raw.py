@@ -469,20 +469,58 @@ def merge_all(entries: List[dict]) -> pd.DataFrame:
 # Step 5 — Predictive Labelling
 # =====================================================================
 
-def _identify_faulty_states(df: pd.DataFrame) -> pd.Series:
-    """Identify rows where a fault is currently active."""
-    # Definition of fault: non-zero alarm code or fault op state
+def _identify_fault_class(df: pd.DataFrame) -> pd.Series:
+    """Identify the multiclass fault label for each row heuristically."""
+    # 0: Normal, 1: Thermal, 2: String Mismatch, 3: Grid Instability, 4: Cooling Failure
+    
+    # Extract needed columns, filling missing with safe defaults
+    temp = df.get("inverter_temperature", pd.Series(0, index=df.index)).astype(float)
+    power = df.get("pv1_power", pd.Series(0, index=df.index)).astype(float)
+    freq = df.get("meter_freq", pd.Series(50.0, index=df.index)).astype(float)
+    
+    # We need string variance if calculated early, otherwise we use raw string logic
+    # In ingest_raw, string_mismatch_std is NOT calculated yet. Features are computed LATER (in Layer 2).
+    # Wait, apply_predictive_labels runs ON ingest, BEFORE feature engineering pipeline!
+    # I need to calculate basic heuristics for the labels directly or use an alarm code.
+    # The user asked for `if cooling_failure_condition: label = 4...`
+    # Let's define simple thresholds for the raw sensor data available in master:
+    # Cooling failure: Extremely high temp (e.g. > 85) while power is low
+    cooling_fail = (temp > 85) & (power < 1000)
+    # Thermal issue: High temp (e.g. > 70)
+    thermal = (temp > 70)
+    # String Mismatch: if we have string columns, check max - min
+    string_cols = [c for c in df.columns if "string" in c.lower() or "pv" in c.lower() and "power" not in c.lower()]
+    string_mismatch = pd.Series(False, index=df.index)
+    if string_cols:
+        string_data = df[string_cols].astype(float)
+        string_mismatch = (string_data.max(axis=1) - string_data.min(axis=1)) > 5.0 # arbitrary threshold
+        
+    # Grid instability: Frequency deviation > 0.5 Hz or Voltage > 250 or < 200
+    grid_instability = (freq > 50.5) | (freq < 49.5)
+    v_cols = [c for c in ["meter_v_r", "meter_v_y", "meter_v_b"] if c in df.columns]
+    if v_cols:
+        v_data = df[v_cols].astype(float)
+        grid_instability = grid_instability | (v_data > 250.0).any(axis=1) | (v_data < 200.0).any(axis=1)
+        
+    # Also include the original alarm code as a fallback cooling/thermal/general fault
     has_alarm = df["inverter_alarm_code"].fillna(0) != 0
-    # Assuming op_state > 10 might indicate fault, 
-    # but based on the previous code, alarm_code != 0 was the primary trigger.
-    return has_alarm
+
+    # Apply deterministic priority
+    labels = pd.Series(0, index=df.index)
+    labels.mask(grid_instability, 3, inplace=True)
+    labels.mask(string_mismatch, 2, inplace=True)
+    labels.mask(thermal, 1, inplace=True)
+    labels.mask(cooling_fail, 4, inplace=True)
+    # If there's an alarm but none of the above caught it, default to thermal (1) or something else?
+    # Let's map alarm_code to 1 if label is still 0
+    labels.mask((labels == 0) & has_alarm, 1, inplace=True)
+    
+    return labels
 
 def apply_predictive_labels(master: pd.DataFrame) -> pd.DataFrame:
-    """Implement will_fail_24h labeling.
+    """Implement multiclass predictive labeling.
     
-    1 if a fault occurs within the next 24 hours.
-    0 otherwise.
-    Remove rows where a fault is already active.
+    Label represents the highest priority fault occurring within the next 24 hours.
     """
     master["timestamp"] = pd.to_datetime(master["timestamp"], utc=True)
     master = master.sort_values(["inverter_id", "timestamp"]).copy()
@@ -492,31 +530,43 @@ def apply_predictive_labels(master: pd.DataFrame) -> pd.DataFrame:
     for inv_id, grp in master.groupby("inverter_id"):
         grp = grp.sort_values("timestamp").copy()
         
-        # 1. Identify active faults
-        is_faulty = _identify_faulty_states(grp)
+        # 1. Identify active fault classes per row
+        current_class = _identify_fault_class(grp)
+        is_faulty = current_class > 0
         
-        # 2. Define prediction target: will fail within 24 hours
+        # 2. Define prediction target: what is the worst fault in next 24h?
         # Look ahead window: 24h / 15min = 96 samples
         lookahead = 24 * 4 # samples
         
-        # A fail transition is when healthy (0) becomes faulty (1)
-        # Shift is_faulty backwards to see if any future row within window is faulty
-        # Use rolling max to see if any 1 appears in the next 96 samples
-        future_fault = is_faulty.rolling(window=lookahead, min_periods=1).max().shift(-lookahead).fillna(0).astype(bool)
+        # For multiclass, we roll and take the MAX class because:
+        # Cooling (4) > Grid (3) > String (2) > Thermal (1)
+        # However, the requested priority is: 4 > 1 > 2 > 3 > 0
+        # This means simple maximum won't respect the exact priority if we just use max().
+        # Let's map to a priority order, take max rolling, and map back.
+        # Original: 0=N, 1=T, 2=S, 3=G, 4=C
+        # Priority: 4 > 1 > 2 > 3 > 0
+        priority_map = {0: 0, 3: 1, 2: 2, 1: 3, 4: 4}
+        reverse_map = {0: 0, 1: 3, 2: 2, 3: 1, 4: 4}
         
-        grp["will_fail_24h"] = future_fault.astype(int)
+        priority_series = current_class.map(priority_map).fillna(0)
+        future_priority = priority_series.rolling(window=lookahead, min_periods=1).max().shift(-lookahead).fillna(0)
+        future_fault_class = future_priority.map(reverse_map).fillna(0).astype(int)
+        
+        grp["will_fail_24h"] = future_fault_class
         grp["is_currently_faulty"] = is_faulty
         
-        # 3. Filter out rows where fault is already active
-        # This ensures the model learns healthy-to-failure transitions
+        # 3. Filter out rows where ANY fault is already active
         grp = grp[~is_faulty].copy()
         
         processed_groups.append(grp)
         log.info("labels_applied_to_inverter", inverter_id=inv_id, rows_remaining=len(grp))
 
+    if not processed_groups:
+        return master
+
     labelled_master = pd.concat(processed_groups, ignore_index=True)
     
-    # Standardize label column name for downstream modules
+    # Standardize label column name
     labelled_master["label"] = labelled_master["will_fail_24h"]
     labelled_master["label_source"] = "predictive_24h"
     

@@ -45,7 +45,7 @@ FEATURE_COLUMNS: List[str] = [
     "thermal_gradient",
     "temp_power_interaction",
     "temp_efficiency_divergence",
-    "temp_rolling_mean_6h",
+    "temperature_mean_6h",
     "temp_rolling_std_12h",
     "temp_rolling_mean_24h",
     "temp_rolling_min_24h",
@@ -59,14 +59,16 @@ FEATURE_COLUMNS: List[str] = [
     "frequency_deviation",
     "power_efficiency_ratio",
     "efficiency_volatility_24h",
+    "efficiency_drop_rate",
     
     # String anomaly
     "string_mismatch_std",
     "string_mismatch_cv",
     "string_max_deviation",
-    "string_current_variance_24h",
+    "string_current_variance",
     
     # Plant Context (Relative Benchmarking)
+    "relative_power",
     "rel_power_to_plant",
     "rel_temp_to_plant",
     "power_rank_within_plant",
@@ -77,6 +79,7 @@ FEATURE_COLUMNS: List[str] = [
     "pv1_power_lag_1", "pv1_power_lag_3", "pv1_power_lag_288",
     "power_vs_24h_baseline",
     "power_trend_12h",
+    "power_trend_24h",
     "efficiency_7d_trend",
     "efficiency_trend_24h",
     "power_ramp_rate",
@@ -147,7 +150,7 @@ def _add_physics_features(df: pd.DataFrame) -> pd.DataFrame:
     df["power_efficiency_ratio"] = (meter_ac / (pv1.replace(0, np.nan))).clip(lower=0, upper=2)
     
     inv_temp = df.get("inverter_temperature", pd.Series(np.nan, index=df.index)).astype(float)
-    df["thermal_gradient"] = inv_temp.diff() / _INTERVAL_HOURS
+    df["thermal_gradient"] = inv_temp.diff()
     df["temp_power_interaction"] = inv_temp * pv1
     
     # mppt imbalance
@@ -171,6 +174,7 @@ def _add_string_anomaly(df: pd.DataFrame) -> pd.DataFrame:
 
     string_vals = df[present].astype(float)
     df["string_mismatch_std"] = string_vals.std(axis=1, skipna=True)
+    df["string_current_variance"] = string_vals.var(axis=1, skipna=True)
     row_mean = string_vals.mean(axis=1, skipna=True).replace(0, np.nan)
     df["string_mismatch_cv"] = df["string_mismatch_std"] / row_mean
     
@@ -192,6 +196,7 @@ def _add_plant_context_features(master: pd.DataFrame) -> pd.DataFrame:
     plant_avgs = master.groupby(["plant_id", "timestamp"])[["pv1_power", "inverter_temperature", "conversion_efficiency"]].transform("mean")
     
     master["rel_power_to_plant"] = master["pv1_power"] / (plant_avgs["pv1_power"] + 1e-6)
+    master["relative_power"] = master["rel_power_to_plant"] # Alias for the requested feature name
     master["rel_temp_to_plant"] = master["inverter_temperature"] - plant_avgs["inverter_temperature"]
     master["efficiency_vs_plant_avg"] = master["conversion_efficiency"] - plant_avgs["conversion_efficiency"]
     
@@ -239,14 +244,14 @@ def _add_rolling_features(grp: pd.DataFrame) -> pd.DataFrame:
     """Compute rolling aggregations within a single inverter group."""
     if "inverter_temperature" in grp.columns:
         temp = grp["inverter_temperature"].astype(float)
-        grp["temp_rolling_mean_6h"] = temp.rolling(window=_SAMPLES_6H, min_periods=_SAMPLES_6H // 2).mean()
+        grp["temperature_mean_6h"] = temp.rolling(window=_SAMPLES_6H, min_periods=_SAMPLES_6H // 2).mean()
         grp["temp_rolling_std_12h"] = temp.rolling(window=_SAMPLES_12H, min_periods=_SAMPLES_12H // 2).std()
         grp["temp_rolling_mean_24h"] = temp.rolling(window=_SAMPLES_24H, min_periods=_SAMPLES_24H // 2).mean()
         grp["temp_rolling_min_24h"] = temp.rolling(window=_SAMPLES_24H, min_periods=_SAMPLES_24H // 2).min()
         grp["temp_rolling_max_24h"] = temp.rolling(window=_SAMPLES_24H, min_periods=_SAMPLES_24H // 2).max()
         grp["temperature_gradient_6h"] = temp.diff(periods=_SAMPLES_6H) / 6.0
     else:
-        grp["temp_rolling_mean_6h"] = np.nan
+        grp["temperature_mean_6h"] = np.nan
         grp["temp_rolling_std_12h"] = np.nan
         grp["temp_rolling_mean_24h"] = np.nan
         grp["temp_rolling_min_24h"] = np.nan
@@ -258,6 +263,8 @@ def _add_rolling_features(grp: pd.DataFrame) -> pd.DataFrame:
         grp["efficiency_7d_trend"] = _rolling_slope(eff, window=_SAMPLES_7D, min_valid=200)
         grp["efficiency_trend_24h"] = _rolling_slope(eff, window=_SAMPLES_24H, min_valid=50)
         grp["efficiency_volatility_24h"] = eff.rolling(window=_SAMPLES_24H, min_periods=10).std()
+        # Drop rate (rate of change over 24 samples)
+        grp["efficiency_drop_rate"] = eff.diff(_SAMPLES_6H) / _SAMPLES_6H
         
         # Temp rises but efficiency drops
         if "thermal_gradient" in grp.columns:
@@ -268,13 +275,16 @@ def _add_rolling_features(grp: pd.DataFrame) -> pd.DataFrame:
         grp["efficiency_7d_trend"] = np.nan
         grp["efficiency_trend_24h"] = np.nan
         grp["efficiency_volatility_24h"] = np.nan
+        grp["efficiency_drop_rate"] = np.nan
         grp["temp_efficiency_divergence"] = np.nan
         
     if "pv1_power" in grp.columns:
         pv1 = grp["pv1_power"].astype(float)
         grp["power_trend_12h"] = _rolling_slope(pv1, window=_SAMPLES_12H, min_valid=24)
+        grp["power_trend_24h"] = _rolling_slope(pv1, window=_SAMPLES_24H, min_valid=48)
     else:
         grp["power_trend_12h"] = np.nan
+        grp["power_trend_24h"] = np.nan
         
     if "mppt_imbalance_ratio" in grp.columns:
         grp["mppt_power_ratio_24h"] = grp["mppt_imbalance_ratio"].astype(float).rolling(window=_SAMPLES_24H, min_periods=10).mean()
@@ -282,9 +292,8 @@ def _add_rolling_features(grp: pd.DataFrame) -> pd.DataFrame:
         grp["mppt_power_ratio_24h"] = np.nan
         
     if "string_mismatch_std" in grp.columns:
-        grp["string_current_variance_24h"] = grp["string_mismatch_std"].astype(float).rolling(window=_SAMPLES_24H, min_periods=10).mean()
-    else:
-        grp["string_current_variance_24h"] = np.nan
+        # Keep original string_current_variance_24h if it was used anywhere, else we removed it from FEATURE_COLUMNS
+        pass
         
     # Grid voltage disturbances
     v_cols = [c for c in ["meter_v_r", "meter_v_y", "meter_v_b"] if c in grp.columns]

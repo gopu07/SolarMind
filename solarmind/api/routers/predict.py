@@ -13,8 +13,11 @@ from api.auth import get_current_user
 from api.schemas.models import (
     BatchPredictRequest,
     PredictRequest,
-    PredictResponse,
+    PredictionResult,
     NarrativeRequest,
+    ShapFeature,
+    LimeFeature,
+    DeltaShapFeature,
 )
 from agent.workflow import run_agent, run_plant
 
@@ -26,7 +29,7 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-@router.post("", response_model=PredictResponse)
+@router.post("", response_model=PredictionResult)
 async def predict_single(req: PredictRequest):
     """Run full prediction pipeline for a single inverter."""
     start_time = time.perf_counter()
@@ -68,20 +71,23 @@ async def predict_single(req: PredictRequest):
         
     latency_ms = (time.perf_counter() - start_time) * 1000.0
     
-    return PredictResponse(
+    return PredictionResult(
         inverter_id=res["inverter_id"],
-        plant_id=res["plant_id"],
-        risk_score=res["risk_score"],
-        risk_level=res["risk_level"],
-        shap_top5=[{"feature": f["feature"], "shap_value": f["shap_value"]} for f in res.get("shap_top5", [])],
-        delta_shap_top5=[{"feature": f["feature"], "delta_shap": f["delta_shap"]} for f in res.get("delta_shap_top5", [])] if res.get("delta_shap_available") else None,
+        plant_id=res.get("plant_id", "UNKNOWN"),
+        predicted_failure_type=res.get("predicted_failure_type", "unknown"),
+        risk_score=res.get("risk_score", 0.0),
+        final_risk_score=res.get("final_risk_score"),
+        anomaly_score=res.get("anomaly_score"),
+        risk_level=res.get("risk_level", "LOW"),
+        shap_top5=[ShapFeature(**f) for f in res.get("shap_top5", [])],
+        lime_top5=[LimeFeature(**f) for f in res.get("lime_top5", [])] if res.get("lime_top5") else None,
+        delta_shap_top5=[DeltaShapFeature(**f) for f in res.get("delta_shap_top5", [])] if res.get("delta_shap_available") else None,
         report=report_obj,
         latency_ms=latency_ms,
         timestamp=int(time.time()),
     )
 
-
-@router.post("/batch", response_model=List[PredictResponse])
+@router.post("/batch", response_model=List[PredictionResult])
 async def predict_batch(req: BatchPredictRequest):
     """Run predictions for all inverters in the plant."""
     import config
@@ -112,7 +118,7 @@ async def predict_batch(req: BatchPredictRequest):
     
     final_responses = []
     for r in results:
-        if isinstance(r, PredictResponse):
+        if isinstance(r, PredictionResult):
             final_responses.append(r)
         # ignore exceptions for batch response or log them
     return final_responses

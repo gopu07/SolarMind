@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import PROCESSED_DIR, ARTIFACTS_DIR
 from features.pipeline import FEATURE_COLUMNS
+from models.ensemble import TreeEnsemble
 import pandas as pd
 import numpy as np
 import pickle
@@ -18,6 +19,7 @@ def main():
     print("⏳ Loading features and model artifacts...")
     features_path = PROCESSED_DIR / "features.parquet"
     model_path = ARTIFACTS_DIR / "model.pkl"
+    iso_model_path = ARTIFACTS_DIR / "isolation_forest.pkl"
     if not features_path.exists() or not model_path.exists():
         print("Required files not found.")
         return
@@ -25,6 +27,11 @@ def main():
     df = pd.read_parquet(features_path)
     with open(model_path, "rb") as f:
         calibrated_model = pickle.load(f)
+        
+    iso_model = None
+    if iso_model_path.exists():
+        with open(iso_model_path, "rb") as f:
+            iso_model = pickle.load(f)
         
     # ── 1. Filter to Replay Window (last 180 days) ── 
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
@@ -39,8 +46,22 @@ def main():
         X[col] = pd.to_numeric(X[col], errors='coerce')
         
     print(f"🤖 Generating predictions for {len(X):,} rows over 6 months...")
-    y_prob = calibrated_model.predict_proba(X)[:, 1]
+    y_proba_full = calibrated_model.predict_proba(X)
+    y_prob = 1.0 - y_proba_full[:, 0] # Probability of ANY fault
     replay_df["risk_score"] = y_prob
+    replay_df["predicted_failure_type"] = np.argmax(y_proba_full, axis=1)
+    
+    if iso_model is not None:
+        iso_features = list(getattr(iso_model, "feature_names_in_", X.columns))
+        X_iso = X[[c for c in iso_features if c in X.columns]].fillna(0)
+        iso_score = iso_model.decision_function(X_iso)
+        # Map roughly to 0-1 where 1 is anomalous
+        anomaly_score = np.clip(0.5 - iso_score, 0.0, 1.0)
+        replay_df["anomaly_score"] = anomaly_score
+        replay_df["final_risk_score"] = 0.7 * y_prob + 0.3 * anomaly_score
+    else:
+        replay_df["anomaly_score"] = 0.0
+        replay_df["final_risk_score"] = y_prob
     
     # ── 3. SHAP ──
     replay_df["top_shap_features"] = "[]"
@@ -48,8 +69,9 @@ def main():
     # ── 4. Format Output Schema ──
     keep_cols = [
         "timestamp", "inverter_id", "plant_id", 
-        "risk_score", "inverter_temperature", "pv1_power", "conversion_efficiency",
-        "top_shap_features", "label"
+        "risk_score", "anomaly_score", "final_risk_score", 
+        "inverter_temperature", "pv1_power", "conversion_efficiency",
+        "top_shap_features", "label", "predicted_failure_type"
     ]
     
     out_df = replay_df[[c for c in keep_cols if c in replay_df.columns]].copy()
@@ -80,11 +102,14 @@ def main():
                         "inverter_id": inv_id,
                         "plant_id": plant_id,
                         "risk_score": 0.0,
+                        "anomaly_score": 0.0,
+                        "final_risk_score": 0.0,
                         "inverter_temperature": 0.0,
                         "pv1_power": 0.0,
                         "conversion_efficiency": 0.0,
                         "top_shap_features": "[]",
-                        "label": 0
+                        "label": 0,
+                        "predicted_failure_type": 0
                     })
             
             if fill_rows:

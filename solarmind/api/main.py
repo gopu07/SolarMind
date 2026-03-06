@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 
 import config
 from api.auth import create_access_token, get_current_user
-from api.schemas.models import Token, PredictRequest, PredictResponse, NarrativeRequest, HealthResponse
+from api.schemas.models import Token, PredictRequest, PredictionResult, NarrativeRequest, HealthResponse
 from api.routers import health, predict, query
 from models.predict import predict_inverter
 from genai.guardrails.validator import get_fallback_report
@@ -36,6 +36,8 @@ log = structlog.get_logger(__name__)
 REQUEST_COUNT = Counter('request_count', 'App Request Count', ['method', 'endpoint', 'http_status'])
 ERROR_COUNT = Counter('error_count', 'App Error Count', ['method', 'endpoint'])
 REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency', ['endpoint'])
+
+APP_START_TIME = time.time()
 
 # --- Classes ---
 class ConnectionManager:
@@ -127,9 +129,63 @@ async def instrumentation_middleware(request: Request, call_next):
 
 
 # Include routers
-app.include_router(health.router)
+# app.include_router(health.router)  # Replaced by inline endpoints
 app.include_router(predict.router)
 app.include_router(query.router)
+
+
+from api.schemas.models import ModelMetricsResponse
+
+@app.get("/health", response_model=HealthResponse, tags=["Health"])
+async def check_health():
+    """Deep health check of all required subsystems."""
+    from api.state import state_manager
+    from models.predict import get_model, get_iso_model
+    
+    checks: Dict[str, str] = {}
+    
+    # Check 1: Model artifacts
+    model_path = config.ARTIFACTS_DIR / "model.pkl"
+    models_ok = model_path.exists()
+    checks["models"] = "ok" if models_ok else "missing"
+        
+    model_loaded = get_model() is not None
+    iso_loaded = get_iso_model() is not None
+    
+    # Count websocket clients
+    ws_clients = sum(len(clients) for clients in manager.active_connections.values())
+    
+    # Inverter count
+    inverter_count = len(state_manager.get_state().get("inverters", {}))
+    
+    overall_status = "ok" if models_ok else "down"
+        
+    return HealthResponse(
+        status=overall_status,
+        checks=checks,
+        model_loaded=model_loaded,
+        isolation_forest_loaded=iso_loaded,
+        inverter_count=inverter_count,
+        websocket_clients=ws_clients,
+        api_uptime_seconds=time.time() - APP_START_TIME,
+    )
+
+@app.get("/model/metrics", response_model=ModelMetricsResponse, tags=["Health"])
+async def get_model_metrics():
+    """Return multiclass performance metrics from latest training report."""
+    report_path = config.ARTIFACTS_DIR / "training_report.json"
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="Training report not found")
+        
+    with open(report_path, "r") as f:
+        report = json.load(f)
+        
+    return ModelMetricsResponse(
+        macro_f1=report.get("macro_f1", 0.0),
+        multiclass_roc_auc=report.get("roc_auc", 0.0),
+        confusion_matrix=report.get("confusion_matrix", None),
+        model_version="1.0"
+    )
 
 
 @app.post("/auth/token", response_model=Token, tags=["Auth"])
@@ -147,28 +203,22 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 async def get_cached_report(inverter_id: str):
     """Generate dynamic AI report for the dashboard."""
     from genai.guardrails.validator import get_fallback_report
-    import pandas as pd
+    from api.state import state_manager
     
     # We will use the fallback generator for fast synchronous UI updates
-    # Get latest risk proxy from our replay predictions if available
-    replay_file = config.PROCESSED_DIR / "replay_predictions.parquet"
+    # Get latest risk proxy from our centralized state manager
     risk_score = 0.5
     risk_level = "MEDIUM"
     plant_id = "PLANT_1"
     
-    if replay_file.exists():
-        try:
-            df = pd.read_parquet(replay_file, filters=[("inverter_id", "==", inverter_id)])
-            if not df.empty:
-                latest = df.sort_values("timestamp").iloc[-1]
-                risk_score = float(latest["risk_score"])
-                plant_id = latest["plant_id"]
-                if risk_score > 0.8: risk_level = "CRITICAL"
-                elif risk_score > 0.6: risk_level = "HIGH"
-                elif risk_score > 0.4: risk_level = "MEDIUM"
-                else: risk_level = "LOW"
-        except Exception:
-            pass
+    inv_state = state_manager.get_inverter_state(inverter_id)
+    if inv_state:
+        risk_score = float(inv_state.get("risk_score", 0.5))
+        plant_id = inv_state.get("plant_id", "PLANT_1")
+        if risk_score > 0.8: risk_level = "CRITICAL"
+        elif risk_score > 0.6: risk_level = "HIGH"
+        elif risk_score > 0.4: risk_level = "MEDIUM"
+        else: risk_level = "LOW"
             
     report_obj = get_fallback_report(
         inverter_id, plant_id, risk_score, risk_level
@@ -177,71 +227,39 @@ async def get_cached_report(inverter_id: str):
 
 @app.get("/inverters", tags=["Data"])
 async def list_inverters():
-    """List all available inverters for the dashboard (with caching)."""
-    global _inverter_list_cache, _cache_timestamp
+    """List all available inverters for the dashboard from the central state manager."""
+    from api.state import state_manager
+    import time
     
-    now = time.time()
-    if _inverter_list_cache and (now - _cache_timestamp < CACHE_TTL):
-        return _inverter_list_cache
-
-    import pandas as pd
-    master_path = config.PROCESSED_DIR / "master_labelled.parquet"
-    if not master_path.exists():
-        raise HTTPException(status_code=503, detail="Processed data missing")
+    plant_state = state_manager.get_state()
+    inverters = plant_state.get("inverters", {})
     
-    log.info("refreshing_inverter_cache")
-
-    # --- FIX: Only read columns that actually exist in master_labelled ---
-    safe_cols = ["inverter_id", "plant_id", "inverter_temperature", "pv1_power"]
-    df = pd.read_parquet(master_path, columns=safe_cols)
-    latest_df = df.groupby("inverter_id").last().reset_index()
-
-    # --- Enrich with risk scores from replay_predictions if available ---
-    risk_lookup: dict = {}
-    eff_lookup: dict = {}
-    replay_path = config.PROCESSED_DIR / "replay_predictions.parquet"
-    if replay_path.exists():
-        try:
-            rp = pd.read_parquet(replay_path, columns=["inverter_id", "risk_score", "conversion_efficiency"])
-            rp_latest = rp.groupby("inverter_id").last().reset_index()
-            risk_lookup = dict(zip(rp_latest["inverter_id"], rp_latest["risk_score"]))
-            if "conversion_efficiency" in rp_latest.columns:
-                eff_lookup = dict(zip(rp_latest["inverter_id"], rp_latest["conversion_efficiency"]))
-        except Exception as e:
-            log.warning("replay_enrichment_failed", error=str(e))
+    if not inverters:
+        # Fallback if state hasn't been populated yet
+        log.warning("plant_state_empty")
+        return []
 
     results = []
-    for _, row in latest_df.iterrows():
-        inv_id = row["inverter_id"]
-        risk_score = float(risk_lookup.get(inv_id, 0.0))
-        if pd.isna(risk_score):
-            risk_score = 0.0
+    for inv_id, inv_data in inverters.items():
+        # Handle combinations of old supervised risk and new anomaly-based risk
+        risk_score = float(inv_data.get("final_risk_score", inv_data.get("risk_score", 0.0)))
         risk_level = config.risk_level_from_score(risk_score)
-        efficiency = float(eff_lookup.get(inv_id, 0.0))
-        if pd.isna(efficiency):
-            efficiency = 0.0
-
+        
         results.append({
             "id": inv_id,
             "name": f"Inverter {inv_id.split('_')[-1]}",
             "risk_score": risk_score,
             "risk_level": risk_level,
+            "anomaly_score": float(inv_data.get("anomaly_score", 0.0)),
             "status": risk_level.lower().replace("high", "high_risk").replace("medium", "warning").replace("low", "healthy"),
-            "temperature": float(row["inverter_temperature"]) if pd.notna(row["inverter_temperature"]) else 0.0,
-            "efficiency": efficiency,
-            "power_output": float(row["pv1_power"]) if pd.notna(row["pv1_power"]) else 0.0,
+            "temperature": float(inv_data.get("temperature", 0.0)),
+            "efficiency": float(inv_data.get("efficiency", 0.0)),
+            "power_output": float(inv_data.get("power", 0.0)),
             "string_mismatch": 0.0,
             "location": "Main Array",
-            "last_updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            "last_updated": plant_state.get("timestamp", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         })
     
-    unique_count = len(results)
-    log.info("inverter_list_ready", unique_inverters=unique_count)
-    print(f"[INVERTER-DEBUG] Backend inverter count: {unique_count}")
-    assert 25 <= unique_count <= 40, f"Unexpected inverter count: {unique_count}"
-
-    _inverter_list_cache = results
-    _cache_timestamp = now
     return results
 
 @app.get("/inverters/{inverter_id}/trends", tags=["Data"])
@@ -321,12 +339,29 @@ async def get_inverter_delta_shap(inverter_id: str):
         } for f in features
     ]
 
+@app.get("/explain/{inverter_id}", tags=["Data"])
+async def get_inverter_explainability(inverter_id: str):
+    """Fetch SHAP and LIME detailed explainability for the selected inverter."""
+    from models.predict import predict_inverter
+    result = predict_inverter(inverter_id, include_delta_shap=False)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+        
+    return {
+        "inverter_id": inverter_id,
+        "predicted_failure_type": result.get("predicted_failure_type", "unknown"),
+        "risk_score": result.get("risk_score", 0.0),
+        "shap_values": result.get("shap_top5", []),
+        "lime_weights": result.get("lime_top5", [])
+    }
+
 
 async def websocket_push_loop():
     """Background task to push chronological updates to active WebSockets."""
     import pandas as pd
     import json
     from datetime import timezone
+    from api.state import state_manager
     
     replay_file = config.PROCESSED_DIR / "replay_predictions.parquet"
     if not replay_file.exists():
@@ -344,25 +379,34 @@ async def websocket_push_loop():
         # We need a list of unique timestamps to iterate through
         timestamps = df["timestamp"].unique()
         
-        # Build persistent state containing ALL inverters from the master list
-        import pandas as pd
+        # Load master to initialize the state manager
         master_path = config.PROCESSED_DIR / "master_labelled.parquet"
         master_df = pd.read_parquet(master_path, columns=["inverter_id", "plant_id"])
         
-        plant_states = {}
+        # We will track plant_id mappings locally for WS broadcasting
+        plant_to_inv = {}
+        initial_state = {"inverters": {}}
         for plant_id in master_df["plant_id"].unique():
             plant_inverters = master_df[master_df["plant_id"] == plant_id]["inverter_id"].unique()
-            plant_states[plant_id] = {inv: {
-                "inverter_id": inv,
-                "risk_score": 0.0,
-                "temperature": 0.0,
-                "power": 0.0,
-                "efficiency": 0.0,
-                "label": 0,
-                "top_features": []
-            } for inv in plant_inverters}
+            plant_to_inv[plant_id] = list(plant_inverters)
             
-        log.info("replay_engine_ready", time_steps=len(timestamps), total_rows=len(df), plants=list(plant_states.keys()), total_inverters=len(master_df["inverter_id"].unique()))
+            for inv in plant_inverters:
+                initial_state["inverters"][inv] = {
+                    "inverter_id": inv,
+                    "plant_id": plant_id,
+                    "risk_score": 0.0,
+                    "anomaly_score": 0.0,
+                    "final_risk_score": 0.0,
+                    "temperature": 0.0,
+                    "power": 0.0,
+                    "efficiency": 0.0,
+                    "label": 0,
+                    "top_features": []
+                }
+        
+        state_manager.update_state(initial_state)
+            
+        log.info("replay_engine_ready", time_steps=len(timestamps), total_rows=len(df), plants=list(plant_to_inv.keys()), total_inverters=len(master_df["inverter_id"].unique()))
         
     except Exception as e:
         log.error("replay_engine_failed_to_load", error=str(e))
@@ -371,45 +415,58 @@ async def websocket_push_loop():
     # Broadcast loop
     while True:
         for current_ts in timestamps:
-            # Yield control occasionally if processing is heavy, but here we just sleep to simulate time passing
             await asyncio.sleep(2.0) # Send a new timestamp payload every 2 seconds
             
             ts_data = df[df["timestamp"] == current_ts]
+            ts_iso = pd.Timestamp(current_ts).isoformat()
+            
+            # 1. Update global state with the new data slice
+            updates = {"timestamp": ts_iso, "inverters": {}}
+            for _, row in ts_data.iterrows():
+                try:
+                    top_features = json.loads(row["top_shap_features"]) if pd.notna(row["top_shap_features"]) else []
+                except:
+                    top_features = []
+                    
+                inv_update = {
+                    "inverter_id": row["inverter_id"],
+                    "plant_id": row["plant_id"],
+                    "risk_score": float(row["risk_score"]) if pd.notna(row["risk_score"]) else 0.0,
+                    "temperature": float(row["inverter_temperature"]) if pd.notna(row["inverter_temperature"]) else 0.0,
+                    "power": float(row["pv1_power"]) if pd.notna(row["pv1_power"]) else 0.0,
+                    "efficiency": float(row.get("conversion_efficiency", 0.0)) if pd.notna(row.get("conversion_efficiency", 0.0)) else 0.0,
+                    "label": int(row["label"]) if pd.notna(row["label"]) else 0,
+                    "top_features": top_features
+                }
+                
+                if "anomaly_score" in row:
+                    inv_update["anomaly_score"] = float(row["anomaly_score"]) if pd.notna(row["anomaly_score"]) else 0.0
+                if "final_risk_score" in row:
+                    inv_update["final_risk_score"] = float(row["final_risk_score"]) if pd.notna(row["final_risk_score"]) else inv_update["risk_score"]
+                
+                updates["inverters"][row["inverter_id"]] = inv_update
+                
+            state_manager.update_state(updates)
+            
+            # 2. Broadcast the relevant subset to web sockets
+            current_state = state_manager.get_state()
             
             for plant_id in list(manager.active_connections.keys()):
-                if not manager.active_connections[plant_id]:
+                if not manager.active_connections[plant_id] or plant_id not in plant_to_inv:
                     continue
                     
-                if plant_id not in plant_states:
-                    continue
-                    
-                current_plant_state = plant_states[plant_id]
-                plant_data = ts_data[ts_data["plant_id"] == plant_id]
+                plant_inverters = [
+                    current_state["inverters"][inv] 
+                    for inv in plant_to_inv[plant_id] 
+                    if inv in current_state["inverters"]
+                ]
                 
-                if not plant_data.empty:
-                    for _, row in plant_data.iterrows():
-                        try:
-                            top_features = json.loads(row["top_shap_features"]) if pd.notna(row["top_shap_features"]) else []
-                        except:
-                            top_features = []
-                            
-                        current_plant_state[row["inverter_id"]] = {
-                            "inverter_id": row["inverter_id"],
-                            "risk_score": float(row["risk_score"]) if pd.notna(row["risk_score"]) else 0.0,
-                            "temperature": float(row["inverter_temperature"]) if pd.notna(row["inverter_temperature"]) else 0.0,
-                            "power": float(row["pv1_power"]) if pd.notna(row["pv1_power"]) else 0.0,
-                            "efficiency": float(row["conversion_efficiency"]) if pd.notna(row["conversion_efficiency"]) else 0.0,
-                            "label": int(row["label"]) if pd.notna(row["label"]) else 0,
-                            "top_features": top_features
-                        }
-                
-                inverter_list = list(current_plant_state.values())
                 payload = {
                     "type": "update",
-                    "timestamp": pd.Timestamp(current_ts).isoformat(),
+                    "timestamp": ts_iso,
                     "plant_id": plant_id,
-                    "inverter_count": len(inverter_list),
-                    "inverters": inverter_list
+                    "inverter_count": len(plant_inverters),
+                    "inverters": plant_inverters
                 }
                 
                 await manager.broadcast_plant(plant_id, payload)

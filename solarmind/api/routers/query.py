@@ -1,18 +1,34 @@
 """
-Layer 7 — Query router.
+Layer 7 — Advanced Query Router.
+
+Integrates the multi-stage hybrid RAG pipeline with telemetry-aware context
+injection and chain-of-thought diagnostic reasoning.
 """
 
+import json
+import re
 import time
-from fastapi import APIRouter, Depends
-import structlog
+from typing import Any, Dict, Optional
 
+import structlog
+from fastapi import APIRouter, Depends
+
+import config
 from api.auth import get_current_user
-from api.schemas.models import QueryRequest, QueryResponse, Citation
-from rag.retriever import query as rag_query
+from api.schemas.models import (
+    Citation,
+    DiagnosticReport,
+    QueryRequest,
+    QueryResponse,
+    ReasoningChain,
+    RecommendedAction,
+    SensorEvidence,
+    SimilarPastEvent,
+)
+from rag.retriever import hybrid_query
 from rag.state import get_session
 from rag.llm_service import llm_service
-import config
-import re
+from rag.telemetry_context import format_telemetry_for_prompt
 
 log = structlog.get_logger(__name__)
 
@@ -22,130 +38,221 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
+
+def _load_v3_prompt() -> str:
+    """Load the v3 chain-of-thought diagnostic prompt template."""
+    prompt_path = config.PROJECT_ROOT / "genai" / "prompts" / "v3_diagnostic.txt"
+    try:
+        with open(prompt_path, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        log.warning("v3_prompt_missing", fallback="v2")
+        # Fallback to basic prompting
+        return (
+            "You are a solar PV expert. Analyze the following context and "
+            "telemetry data to answer the question. Return JSON with keys: "
+            "diagnosis, risk_level, root_cause_hypothesis, sensor_evidence, "
+            "recommended_actions, similar_past_events, reasoning_chain, "
+            "confidence, data_quality.\n\n{question}"
+        )
+
+
+def _parse_diagnostic_report(raw: str) -> Optional[DiagnosticReport]:
+    """Attempt to parse LLM response into a DiagnosticReport."""
+    cleaned = raw.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    cleaned = cleaned.strip()
+
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+
+    try:
+        sensor_evidence = [
+            SensorEvidence(**se) for se in data.get("sensor_evidence", [])
+        ]
+        recommended_actions = [
+            RecommendedAction(**ra) for ra in data.get("recommended_actions", [])
+        ]
+        similar_past_events = [
+            SimilarPastEvent(**spe) for spe in data.get("similar_past_events", [])
+        ]
+        reasoning_chain = None
+        if data.get("reasoning_chain"):
+            reasoning_chain = ReasoningChain(**data["reasoning_chain"])
+
+        return DiagnosticReport(
+            diagnosis=data.get("diagnosis", "Unable to determine diagnosis"),
+            risk_level=data.get("risk_level", "MEDIUM"),
+            root_cause_hypothesis=data.get("root_cause_hypothesis", "Insufficient data for root cause analysis"),
+            sensor_evidence=sensor_evidence,
+            recommended_actions=recommended_actions,
+            similar_past_events=similar_past_events,
+            reasoning_chain=reasoning_chain,
+            confidence=data.get("confidence", "MEDIUM"),
+            data_quality=data.get("data_quality", "PARTIAL"),
+        )
+    except Exception as e:
+        log.warning("diagnostic_report_parse_failed", error=str(e))
+        return None
+
+
 @router.post("", response_model=QueryResponse)
 async def query_rag(req: QueryRequest):
-    """Run a grounded RAG query against the vector store."""
+    """Run a grounded multi-stage RAG query with diagnostic reasoning."""
     start_time = time.perf_counter()
-    
-    results = rag_query(req.question, req.plant_id, req.top_k)
-    
+
+    # ── Stage 1: Hybrid retrieval ─────────────────────────────────────
+    retrieval_result = hybrid_query(
+        question=req.question,
+        plant_id=req.plant_id,
+        top_k=req.top_k,
+        enable_multi_query=req.enable_multi_query,
+        enable_reranking=req.enable_reranking,
+    )
+
+    results = retrieval_result["results"]
+    history = retrieval_result["history"]
+    stats = retrieval_result["stats"]
+
+    # ── Build citations ───────────────────────────────────────────────
     citations = []
     context_chunks = []
     for r in results:
-        meta = r["metadata"]
-        content = r["content"]
+        meta = r.get("metadata", {})
+        content = r.get("content", "")
         citations.append(
             Citation(
-                inverter_id=meta.get("inverter_id", "UNKNOWN"),
+                inverter_id=meta.get("inverter_id", "KNOWLEDGE_BASE"),
                 timestamp=int(meta.get("timestamp", 0)),
-                risk_level=meta.get("risk_level", "UNKNOWN")
+                risk_level=meta.get("risk_level", meta.get("severity", "INFO")),
+                relevance_score=round(r.get("rerank_score", r.get("combined_score", 0)), 3),
+                retrieval_method=r.get("retrieval_method", "hybrid"),
             )
         )
-        context_chunks.append(f"Source [{meta.get('inverter_id', 'UNKNOWN')} "
-                              f"at {meta.get('timestamp', 0)}]:\n{content}")
-        
-    # Generate answer via LLM
+        context_chunks.append(
+            f"Source [{meta.get('inverter_id', meta.get('concept', 'UNKNOWN'))} "
+            f"at {meta.get('timestamp', 0)} | "
+            f"score={r.get('combined_score', 0):.3f}]:\n{content}"
+        )
+
+    # ── Build historical context ──────────────────────────────────────
+    history_parts = []
+    for h in history:
+        hmeta = h.get("metadata", {})
+        history_parts.append(
+            f"[{hmeta.get('event_type', 'unknown')} | "
+            f"{hmeta.get('inverter_id', '?')} | "
+            f"sim={h.get('similarity', 0):.3f}]: "
+            f"{h.get('content', '')[:300]}"
+        )
+
+    # ── Stage 2: Telemetry context injection ──────────────────────────
+    # Extract inverter ID from query if present
+    inv_match = re.search(r"(INV[-_]\d+)", req.question.upper())
+    inverter_id = inv_match.group(1).replace("-", "_") if inv_match else None
+
+    telemetry_str, anomalies = format_telemetry_for_prompt(
+        inverter_id=inverter_id,
+        plant_id=req.plant_id,
+    )
+
+    anomaly_summary = "No anomalies detected."
+    if anomalies:
+        anomaly_lines = [f"- [{a['severity']}] {a['description']}" for a in anomalies]
+        anomaly_summary = f"{len(anomalies)} anomalies detected:\n" + "\n".join(anomaly_lines)
+
+    # ── Session state ─────────────────────────────────────────────────
+    session = get_session()
+    if inverter_id:
+        session.last_inverter = inverter_id
+        session.last_intent = "inverter_diagnostics"
+
+    # Handle follow-up context
+    q_lower = req.question.lower()
+    if any(term in q_lower for term in ["yes", "show details", "tell me more"]):
+        if session.last_inverter and not inverter_id:
+            inverter_id = session.last_inverter
+
+    # ── Context header ────────────────────────────────────────────────
+    context_header = ""
+    if inverter_id:
+        context_header = f"Focus on Inverter {inverter_id}"
+        if req.plant_id:
+            context_header += f" in Plant {req.plant_id}"
+    elif req.plant_id:
+        context_header = f"Plant-wide analysis for {req.plant_id}"
+
+    # ── Stage 3: LLM generation with chain-of-thought ─────────────────
     answer = "LLM unavailable or API key missing."
+    diagnostic_report = None
+
     if config.OPENAI_API_KEY:
         try:
             import openai
-            import pandas as pd
-            import json
-            
-            client_kwargs = {"api_key": config.OPENAI_API_KEY}
+
+            client_kwargs: Dict[str, Any] = {"api_key": config.OPENAI_API_KEY}
             if config.OPENAI_BASE_URL:
                 client_kwargs["base_url"] = config.OPENAI_BASE_URL
             client = openai.OpenAI(**client_kwargs)
-            
-            # Retrieve latest telemetry for diagnostic reasoning
-            telemetry_str = "No recent telemetry found."
-            master_path = config.PROCESSED_DIR / "master_labelled.parquet"
-            if master_path.exists():
-                try:
-                    df = pd.read_parquet(master_path)
-                    if req.plant_id and req.plant_id in df["plant_id"].values:
-                        df = df[df["plant_id"] == req.plant_id].copy()
-                        
-                    if not df.empty:
-                        df["timestamp"] = pd.to_datetime(df["timestamp"])
-                        latest = df.sort_values("timestamp").groupby("inverter_id").last().reset_index()
-                        
-                        signals = [
-                            "inverter_id", "pv1_power", "pv2_power", "pv1_voltage", "pv1_current", 
-                            "inverter_temperature", "inverter_op_state", "inverter_alarm_code", 
-                            "meter_active_power", "meter_v_r", "meter_v_y", "meter_v_b"
-                        ] + [f"smu_string{i}" for i in range(1, 15)]
-                        
-                        avail_cols = [c for c in signals if c in latest.columns]
-                        telemetry_str = latest[avail_cols].to_json(orient="records")
-                except Exception as e:
-                    log.error("telemetry_load_failed_for_prompt", error=str(e))
-            
-            # Extract Inverter ID if present
-            inverter_match = re.search(r'(INV[-_]\d+)', req.question.upper())
-            inverter_id = inverter_match.group(1) if inverter_match else None
-            
-            # Determine Intent
-            intent = "general"
-            q_lower = req.question.lower()
-            if any(term in q_lower for term in ["plant summary", "plant health", "overall status"]):
-                intent = "plant_summary"
-            elif inverter_id:
-                intent = "inverter_diagnostics"
-            elif any(term in q_lower for term in ["yes", "show details", "tell me more"]):
-                intent = "follow_up"
-            
-            # Update Session State
-            session = get_session() # Using default session for now
-            if inverter_id:
-                session.last_inverter = inverter_id
-                session.last_intent = "inverter_diagnostics"
-            elif intent == "plant_summary":
-                session.last_intent = "plant_summary"
-            
-            # Handle Follow-up Context
-            effective_inverter = inverter_id
-            if intent == "follow_up" and session.last_inverter:
-                effective_inverter = session.last_inverter
-                intent = "inverter_diagnostics"
-            
-            # Tailor Prompt based on Intent
-            intent_instruction = ""
-            if intent == "plant_summary":
-                intent_instruction = """The user wants a PLANT SUMMARY. 
-Provide a high-level overview of the entire plant's health. 
-List any inverters with high risk scores (>=0.6) and summarize active alerts."""
-            elif intent == "inverter_diagnostics":
-                intent_instruction = f"""The user wants INVERTER DIAGNOSTICS for {effective_inverter}.
-Focus specifically on {effective_inverter}. 
-Explain its risk score, identify the top SHAP drivers, analyze its temperature trend relative to plant average, and provide specific maintenance recommendations."""
-            
-            full_prompt = f"""Documents:
-{"".join(context_chunks)}
 
-Telemetry:
-{telemetry_str}
+            template = _load_v3_prompt()
 
-Logic:
-If fault diagnosis requested, apply fault detection steps...
-
-Question: {req.question}
-"""
-            answer = llm_service.generate_response(
-                prompt=full_prompt,
-                system_prompt=f"You are a solar PV expert. {intent_instruction}"
+            full_prompt = template.format(
+                context_header=context_header,
+                knowledge_context="\n\n".join(context_chunks),
+                telemetry_context=telemetry_str,
+                anomaly_summary=anomaly_summary,
+                historical_context="\n".join(history_parts) if history_parts else "No similar historical events found.",
+                rag_documents=f"{len(results)} documents retrieved via hybrid search.",
+                question=req.question,
             )
-        except Exception as e:
-            log.warning("llm_qa_failed", error=str(e))
-            answer = f"Error: {str(e)}"
+
+            resp = client.chat.completions.create(
+                model=config.LLM_MODEL,
+                messages=[
+                    {"role": "user", "content": full_prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.1,
+                timeout=30.0,
+            )
+
+            raw_answer = resp.choices[0].message.content or ""
+
+            # Parse into structured DiagnosticReport
+            diagnostic_report = _parse_diagnostic_report(raw_answer)
+
+            if diagnostic_report:
+                answer = (
+                    f"**Diagnosis:** {diagnostic_report.diagnosis}\n\n"
+                    f"**Risk Level:** {diagnostic_report.risk_level}\n\n"
+                    f"**Root Cause:** {diagnostic_report.root_cause_hypothesis}\n\n"
+                )
+                if diagnostic_report.recommended_actions:
+                    answer += "**Recommended Actions:**\n"
+                    for ra in diagnostic_report.recommended_actions:
+                        answer += f"- [{ra.priority}] {ra.action}\n"
+            else:
+                # Fallback: use raw LLM text
+                answer = raw_answer
+
         except Exception as e:
             log.warning("llm_qa_failed", error=str(e))
             answer = f"Error calling LLM: {str(e)}"
-            
+
     latency_ms = (time.perf_counter() - start_time) * 1000.0
-    
+
     return QueryResponse(
         answer=answer,
         citations=citations,
-        latency_ms=latency_ms
+        diagnostic_report=diagnostic_report,
+        retrieval_stats=stats,
+        latency_ms=latency_ms,
     )

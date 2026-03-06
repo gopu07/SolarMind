@@ -1,0 +1,114 @@
+concept: inverter_fault_types
+category: fault_diagnosis
+description: >
+  Comprehensive catalog of solar inverter fault types including power electronics
+  failures, communication faults, and operational anomalies.
+
+chunks:
+  - id: ift_001
+    title: "IGBT Module Failure"
+    symptoms:
+      - "sudden complete power drop to zero"
+      - "inverter shutdown with alarm code 3xx"
+      - "audible buzzing or clicking from inverter cabinet"
+    sensor_signals:
+      - "inverter_temperature > 85°C prior to shutdown"
+      - "pv1_power = 0 and pv2_power = 0 simultaneously"
+      - "inverter_op_state transitions to FAULT"
+      - "meter_active_power drops to 0"
+    probable_causes:
+      - "prolonged thermal stress exceeding 80°C for extended periods"
+      - "gate driver circuit malfunction"
+      - "DC bus overvoltage transient"
+      - "manufacturing defect in IGBT module"
+    recommended_actions:
+      - "immediate inverter shutdown and lockout"
+      - "inspect IGBT module for burn marks or discoloration"
+      - "check DC bus capacitor bank for swelling"
+      - "replace IGBT module and test gate driver signals"
+      - "review thermal management system before restart"
+
+  - id: ift_002
+    title: "DC Arc Fault"
+    symptoms:
+      - "intermittent power fluctuations on one string"
+      - "arc fault alarm code triggered"
+      - "string current drops with random spikes"
+    sensor_signals:
+      - "smu_string currents show erratic behavior on specific string"
+      - "inv_string values show high-frequency oscillations"
+      - "inverter_alarm_code indicates arc fault (code 2xx)"
+    probable_causes:
+      - "loose connector at combiner box"
+      - "damaged cable insulation"
+      - "corroded MC4 connector"
+      - "cracked solder joint on module junction box"
+    recommended_actions:
+      - "isolate affected string at combiner box disconnect"
+      - "perform IR thermography scan along string cabling"
+      - "inspect all MC4 connectors for burn marks"
+      - "measure insulation resistance of affected string"
+      - "replace damaged connectors and re-torque all connections"
+
+  - id: ift_003
+    title: "Grid Voltage Anomaly"
+    symptoms:
+      - "frequent inverter trips and restarts"
+      - "grid voltage readings outside ±10% nominal"
+      - "anti-islanding protection activating"
+    sensor_signals:
+      - "meter_v_r, meter_v_y, meter_v_b showing asymmetry > 5%"
+      - "meter_freq deviating from 50Hz ± 0.5Hz"
+      - "inverter_op_state cycling between RUN and STANDBY"
+    probable_causes:
+      - "utility grid instability or voltage sag"
+      - "transformer tap changer malfunction"
+      - "undersized grid connection cable"
+      - "neighboring plant reactive power injection"
+    recommended_actions:
+      - "install power quality meter at PCC for 7-day recording"
+      - "contact utility for grid voltage investigation"
+      - "check transformer tap position and calibration"
+      - "review reactive power settings in inverter configuration"
+
+  - id: ift_004
+    title: "MPPT Tracking Failure"
+    symptoms:
+      - "power output significantly below expected for irradiance level"
+      - "operating voltage drifts away from maximum power point"
+      - "one MPPT channel underperforming vs the other"
+    sensor_signals:
+      - "pv1_voltage or pv2_voltage deviating > 15% from expected Vmpp"
+      - "pv1_power / pv2_power ratio deviating from historical norm"
+      - "conversion_efficiency dropping below 0.85"
+    probable_causes:
+      - "MPPT algorithm stuck at local maximum"
+      - "partial shading on one string group"
+      - "PID (potential induced degradation) on modules"
+      - "firmware bug in MPPT controller"
+    recommended_actions:
+      - "restart inverter to reset MPPT algorithm"
+      - "perform IV curve trace on affected string group"
+      - "check for shading from new obstructions"
+      - "update inverter firmware to latest version"
+      - "measure module-level voltage to detect PID"
+
+  - id: ift_005
+    title: "Communication Loss"
+    symptoms:
+      - "data gaps in telemetry readings"
+      - "inverter appears offline in monitoring system"
+      - "last known readings show normal operation"
+    sensor_signals:
+      - "all sensor readings return NaN or zero for extended period"
+      - "timestamp gaps > 30 minutes in telemetry data"
+    probable_causes:
+      - "RS485/Modbus communication cable damaged"
+      - "datalogger firmware crash"
+      - "network switch or router failure"
+      - "inverter communication board malfunction"
+    recommended_actions:
+      - "verify datalogger status and restart if needed"
+      - "check RS485 cable continuity and termination resistors"
+      - "ping inverter communication IP if Ethernet connected"
+      - "replace communication board if persistent"

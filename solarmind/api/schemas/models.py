@@ -24,6 +24,38 @@ class Token(BaseModel):
 class HealthResponse(BaseModel):
     status: str = Field(description="'ok', 'degraded', or 'down'")
     checks: Dict[str, str] = Field(description="Status of individual components")
+    model_loaded: bool = False
+    isolation_forest_loaded: bool = False
+    inverter_count: int = 0
+    websocket_clients: int = 0
+    api_uptime_seconds: float = 0.0
+
+class ModelMetricsResponse(BaseModel):
+    macro_f1: float
+    multiclass_roc_auc: float
+    confusion_matrix: Optional[List[List[int]]] = None
+    model_version: str
+
+
+# =====================================================================
+# State Schemas
+# =====================================================================
+class InverterState(BaseModel):
+    inverter_id: str
+    plant_id: str
+    risk_score: float
+    anomaly_score: float
+    final_risk_score: float
+    temperature: float
+    power: float
+    efficiency: float
+    label: int
+    top_features: List[Dict[str, float]] = Field(default_factory=list)
+
+class PlantState(BaseModel):
+    timestamp: str
+    inverter_count: int
+    inverters: Dict[str, InverterState]
 
 
 # =====================================================================
@@ -34,6 +66,7 @@ class PredictRequest(BaseModel):
     lookback_rows: int = Field(default=672, ge=96, le=2000)
     generate_narrative: bool = True
     include_delta_shap: bool = True
+
 
 
 class BatchPredictRequest(BaseModel):
@@ -51,12 +84,21 @@ class DeltaShapFeature(BaseModel):
     delta_shap: float
 
 
-class PredictResponse(BaseModel):
+class LimeFeature(BaseModel):
+    feature: str
+    lime_weight: float
+
+
+class PredictionResult(BaseModel):
     inverter_id: str
     plant_id: str
+    predicted_failure_type: str = "unknown"
     risk_score: float
+    final_risk_score: Optional[float] = None
+    anomaly_score: Optional[float] = None
     risk_level: str
     shap_top5: List[ShapFeature]
+    lime_top5: Optional[List[LimeFeature]] = None
     delta_shap_top5: Optional[List[DeltaShapFeature]] = None
     report: Optional[InverterReport] = None
     latency_ms: float
@@ -77,17 +119,61 @@ class QueryRequest(BaseModel):
     question: str
     plant_id: Optional[str] = None
     top_k: int = Field(default=5, ge=1, le=20)
+    enable_multi_query: bool = True
+    enable_reranking: bool = True
 
 
 class Citation(BaseModel):
     inverter_id: str
     timestamp: int
     risk_level: str
+    relevance_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    retrieval_method: str = Field(default="hybrid")
 
     model_config = ConfigDict(extra="ignore")
+
+
+class SensorEvidence(BaseModel):
+    signal: str
+    value: str
+    expected: str = ""
+    assessment: str = ""
+
+
+class RecommendedAction(BaseModel):
+    action: str
+    priority: str = Field(default="7d")  # immediate | 24h | 48h | 7d
+    justification: str = ""
+
+
+class SimilarPastEvent(BaseModel):
+    event_id: str = ""
+    similarity: str = ""
+
+
+class ReasoningChain(BaseModel):
+    step1_telemetry_analysis: str = ""
+    step2_abnormal_signals: str = ""
+    step3_fault_matching: str = ""
+    step4_diagnosis: str = ""
+    step5_actions: str = ""
+
+
+class DiagnosticReport(BaseModel):
+    diagnosis: str = Field(max_length=300)
+    risk_level: str
+    root_cause_hypothesis: str = Field(max_length=600)
+    sensor_evidence: List[SensorEvidence] = Field(default_factory=list)
+    recommended_actions: List[RecommendedAction] = Field(default_factory=list)
+    similar_past_events: List[SimilarPastEvent] = Field(default_factory=list)
+    reasoning_chain: Optional[ReasoningChain] = None
+    confidence: str = "MEDIUM"
+    data_quality: str = "PARTIAL"
 
 
 class QueryResponse(BaseModel):
     answer: str
     citations: List[Citation]
+    diagnostic_report: Optional[DiagnosticReport] = None
+    retrieval_stats: Optional[Dict[str, Any]] = None
     latency_ms: float
