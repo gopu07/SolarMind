@@ -190,28 +190,56 @@ async def list_inverters():
         raise HTTPException(status_code=503, detail="Processed data missing")
     
     log.info("refreshing_inverter_cache")
-    df = pd.read_parquet(master_path, columns=["inverter_id", "plant_id", "risk_score", "inverter_temperature", "pv1_power", "conversion_efficiency"])
+
+    # --- FIX: Only read columns that actually exist in master_labelled ---
+    safe_cols = ["inverter_id", "plant_id", "inverter_temperature", "pv1_power"]
+    df = pd.read_parquet(master_path, columns=safe_cols)
     latest_df = df.groupby("inverter_id").last().reset_index()
-    
+
+    # --- Enrich with risk scores from replay_predictions if available ---
+    risk_lookup: dict = {}
+    eff_lookup: dict = {}
+    replay_path = config.PROCESSED_DIR / "replay_predictions.parquet"
+    if replay_path.exists():
+        try:
+            rp = pd.read_parquet(replay_path, columns=["inverter_id", "risk_score", "conversion_efficiency"])
+            rp_latest = rp.groupby("inverter_id").last().reset_index()
+            risk_lookup = dict(zip(rp_latest["inverter_id"], rp_latest["risk_score"]))
+            if "conversion_efficiency" in rp_latest.columns:
+                eff_lookup = dict(zip(rp_latest["inverter_id"], rp_latest["conversion_efficiency"]))
+        except Exception as e:
+            log.warning("replay_enrichment_failed", error=str(e))
+
     results = []
     for _, row in latest_df.iterrows():
-        risk_score = float(row["risk_score"]) if pd.notna(row["risk_score"]) else 0.0
+        inv_id = row["inverter_id"]
+        risk_score = float(risk_lookup.get(inv_id, 0.0))
+        if pd.isna(risk_score):
+            risk_score = 0.0
         risk_level = config.risk_level_from_score(risk_score)
+        efficiency = float(eff_lookup.get(inv_id, 0.0))
+        if pd.isna(efficiency):
+            efficiency = 0.0
 
         results.append({
-            "id": row["inverter_id"],
-            "name": f"Inverter {row['inverter_id'].split('_')[-1]}",
+            "id": inv_id,
+            "name": f"Inverter {inv_id.split('_')[-1]}",
             "risk_score": risk_score,
             "risk_level": risk_level,
             "status": risk_level.lower().replace("high", "high_risk").replace("medium", "warning").replace("low", "healthy"),
             "temperature": float(row["inverter_temperature"]) if pd.notna(row["inverter_temperature"]) else 0.0,
-            "efficiency": float(row["conversion_efficiency"]) if pd.notna(row["conversion_efficiency"]) else 0.0,
+            "efficiency": efficiency,
             "power_output": float(row["pv1_power"]) if pd.notna(row["pv1_power"]) else 0.0,
             "string_mismatch": 0.0,
             "location": "Main Array",
             "last_updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         })
     
+    unique_count = len(results)
+    log.info("inverter_list_ready", unique_inverters=unique_count)
+    print(f"[INVERTER-DEBUG] Backend inverter count: {unique_count}")
+    assert 25 <= unique_count <= 40, f"Unexpected inverter count: {unique_count}"
+
     _inverter_list_cache = results
     _cache_timestamp = now
     return results
@@ -375,11 +403,13 @@ async def websocket_push_loop():
                             "top_features": top_features
                         }
                 
+                inverter_list = list(current_plant_state.values())
                 payload = {
                     "type": "update",
                     "timestamp": pd.Timestamp(current_ts).isoformat(),
                     "plant_id": plant_id,
-                    "inverters": list(current_plant_state.values())
+                    "inverter_count": len(inverter_list),
+                    "inverters": inverter_list
                 }
                 
                 await manager.broadcast_plant(plant_id, payload)

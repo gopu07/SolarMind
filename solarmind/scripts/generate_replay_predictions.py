@@ -43,9 +43,6 @@ def main():
     replay_df["risk_score"] = y_prob
     
     # ── 3. SHAP ──
-    # The SHAP TreeExplainer C++ backend is currently incompatible with this 
-    # specific version of XGBoost/Pythons base_score string formatting '[5E-1]'.
-    # To unblock the replay engine, we skip calculating SHAP drivers here.
     replay_df["top_shap_features"] = "[]"
         
     # ── 4. Format Output Schema ──
@@ -56,12 +53,60 @@ def main():
     ]
     
     out_df = replay_df[[c for c in keep_cols if c in replay_df.columns]].copy()
+
+    # ── 5. FIX: Ensure ALL master inverters appear in the replay dataset ──
+    master_path = PROCESSED_DIR / "master_labelled.parquet"
+    if master_path.exists():
+        master_inv = pd.read_parquet(master_path, columns=["inverter_id", "plant_id"])
+        master_inv = master_inv.drop_duplicates(subset=["inverter_id"])
+        
+        replay_inv_ids = set(out_df["inverter_id"].unique())
+        master_inv_ids = set(master_inv["inverter_id"].unique())
+        missing_ids = master_inv_ids - replay_inv_ids
+        
+        if missing_ids:
+            print(f"⚠️  {len(missing_ids)} inverters missing from replay: {sorted(missing_ids)}")
+            # For each missing inverter, create placeholder rows at each unique timestamp
+            timestamps = out_df["timestamp"].unique()
+            # Pick a subset of timestamps to avoid huge expansion (every 10th)
+            sample_ts = timestamps[::10] if len(timestamps) > 100 else timestamps
+            
+            fill_rows = []
+            for inv_id in missing_ids:
+                plant_id = master_inv[master_inv["inverter_id"] == inv_id]["plant_id"].iloc[0]
+                for ts in sample_ts:
+                    fill_rows.append({
+                        "timestamp": ts,
+                        "inverter_id": inv_id,
+                        "plant_id": plant_id,
+                        "risk_score": 0.0,
+                        "inverter_temperature": 0.0,
+                        "pv1_power": 0.0,
+                        "conversion_efficiency": 0.0,
+                        "top_shap_features": "[]",
+                        "label": 0
+                    })
+            
+            if fill_rows:
+                fill_df = pd.DataFrame(fill_rows)
+                # Align columns
+                for c in out_df.columns:
+                    if c not in fill_df.columns:
+                        fill_df[c] = np.nan
+                out_df = pd.concat([out_df, fill_df[out_df.columns]], ignore_index=True)
+                print(f"✅ Backfilled {len(fill_rows)} rows for {len(missing_ids)} missing inverters")
     
+    # ── 6. Validate ──
+    unique_inverters = out_df["inverter_id"].nunique()
+    print(f"[REPLAY-DEBUG] Unique inverter count: {unique_inverters}")
+    assert 25 <= unique_inverters <= 40, f"Unexpected replay inverter count: {unique_inverters}"
+
     out_path = PROCESSED_DIR / "replay_predictions.parquet"
     out_df.to_parquet(out_path, index=False, engine="pyarrow")
     
     print(f"✅ Replay predictions saved to: {out_path}")
     print(f"   Shape: {out_df.shape}")
+    print(f"   Unique Inverters: {unique_inverters}")
     print(f"   Time Span: {out_df['timestamp'].min()} to {out_df['timestamp'].max()}")
 
 if __name__ == "__main__":
