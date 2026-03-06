@@ -8,9 +8,10 @@ By unpivoting complex, multi-dimensional datalogger telemetry and applying local
 
 ## 💎 Core Capabilities
 
-### 1. Predictive Maintenance Engine (Layer 3)
-- **XGBoost Classifier**: A calibrated binary classifier trained to detect failure events within a 7–10 day forward window.
-- **Explainable AI (XAI)**: Native integration of **SHAP (SHapley Additive exPlanations)** to extract granular feature contributions.
+### 1. Heterogeneous Ensemble Engine (Layer 3)
+- **Multi-Model Ensemble**: A weighted voting ensemble combining **XGBoost (50%)**, **LightGBM (30%)**, and **CatBoost (20%)** to maximize predictive stability and handle multivariate sensor noise.
+- **Calibrated Probability**: Platt scaling (sigmoid calibration) applied to the ensemble output to ensure risk scores represent true failure probabilities.
+- **Explainable AI (XAI)**: Integrated **SHAP (SHapley Additive exPlanations)** to extract granular feature contributions from the ensemble.
 - **Delta-SHAP Inference**: A temporal contrast mechanism that compares current importance vectors against T-24h baselines to detect rapid drifts in thermal or electrical state.
 
 ### 2. Feature Engineering Pipeline (Layer 2)
