@@ -1,23 +1,33 @@
-# ☀️ SolarMind
+# ☀️ SolarMind: Industrial AI for Solar Excellence
 
-**Industrial AI for Predictive Maintenance & Intelligence in Solar PV Plants**
+**SolarMind** is a production-ready, industrial AI platform designed for predictive maintenance, fault isolation, and operational intelligence in utility-scale solar PV plants. 
 
-SolarMind is a production-grade platform designed to transform raw solar array telemetry into actionable, predictive maintenance insights. By leveraging advanced machine learning and generative AI, it identifies equipment degradation before failure occurs, providing maintenance teams with precise diagnostic narratives and automated ticketing.
-
----
-
-## 🚀 Key Features
-
-- **Predictive Analytics**: Utilizes **XGBoost** to model failure risk for individual inverters with high sensitivity to equipment degradation.
-- **Explainable AI (XAI)**: Integrated **SHAP (SHapley Additive exPlanations)** values to provide "why" behind every alert, identifying specific sensor drivers.
-- **GenAI Diagnostics**: Automatically generates human-readable diagnostic narratives using **LLMs**, grounded in real-time telemetry.
-- **RAG-Powered Intelligence**: A **Retrieval-Augmented Generation** pipeline that connects historical maintenance logs and telemetry for smarter troubleshooting.
-- **Real-Time Monitoring**: A high-performance **React Dashboard** featuring a "32-Inverter Command Center" with live WebSocket streaming.
-- **Automated Workflows**: End-to-end agentic workflow for automated ticket generation and notifications via **LangGraph**.
+By unpivoting complex, multi-dimensional datalogger telemetry and applying localized XGBoost modeling, SolarMind identifies equipment degradation signatures *days* before they manifest as critical failures.
 
 ---
 
-## 🏗️ Architecture
+## 💎 Core Capabilities
+
+### 1. Predictive Maintenance Engine (Layer 3)
+- **XGBoost Classifier**: A calibrated binary classifier trained to detect failure events within a 7–10 day forward window.
+- **Explainable AI (XAI)**: Native integration of **SHAP (SHapley Additive exPlanations)** to extract granular feature contributions.
+- **Delta-SHAP Inference**: A temporal contrast mechanism that compares current importance vectors against T-24h baselines to detect rapid drifts in thermal or electrical state.
+
+### 2. Feature Engineering Pipeline (Layer 2)
+- **Physics-Derived Features**: Real-time compute of **Conversion Efficiency** and **Thermal Gradients** clip-detected for nighttime thresholds.
+- **Plant-Context Benchmarking**: Dynamic ranking of inverters (power, temperature, efficiency) against the real-time average of their respective plants to isolate local faults from global environmental variants (e.g., cloud cover).
+- **Cyclical Encoding**: Fourier transforms applied to temporal variables (`hour`, `month`, `day_of_year`) to capture solar irradiance cycles.
+
+### 3. Generative AI & RAG (Layers 4 & 5)
+- **Grounded Narrative Generation**: LLM-based diagnostics grounded in a strict **Fault Isolation Logic** matrix (e.g., MPPT Imbalance vs. Thermal Disconnect).
+- **ChromaDB Vector Store**: A 90-day rolling window of maintenance logs and prediction reports, enabling natural-language querying of plant history.
+- **Pydantic Guardrails**: Ensuring all GenAI outputs follow strictly typed industrial reporting schemas.
+
+---
+
+## 🏗️ System Architecture
+
+SolarMind is built using a strict 10-layer decoupled architecture:
 
 ```mermaid
 graph TD
@@ -28,135 +38,103 @@ graph TD
     classDef data fill:#f59e0b,stroke:#b45309,stroke-width:2px,color:#fff;
     classDef llm fill:#ec4899,stroke:#9d174d,stroke-width:2px,color:#fff;
 
-    %% Data Layer
-    subgraph Data Sources
-        RawCSV[("Raw Datalogger CSVs")]:::data
-        ProcessedPQ[("Processed Parquet")]:::data
-        VectorDB[("ChromaDB Vector Store")]:::data
+    subgraph Data
+        RawCSV[("Datalogger CSVs")]:::data
+        PQ[("Master Parquet")]:::data
+        VectorDB[("ChromaDB Store")]:::data
     end
 
-    %% Pipeline Layer
-    subgraph ML Pipeline
-        Ingest[("Data Ingestion")]:::pipeline
-        Features[("Feature Engineering")]:::pipeline
-        Train[("XGBoost Trainer")]:::pipeline
+    subgraph Intelligence
+        Features[("Pipeline Engine")]:::pipeline
+        XGB[("XGBoost Model")]:::pipeline
+        SHAP[("SHAP Inference")]:::pipeline
+        GenAI[("GenAI Agent")]:::llm
     end
 
-    %% API Layer
-    subgraph Backend Services (FastAPI)
-        PredictAPI["POST /predict"]:::api
-        QueryAPI["POST /query (RAG)"]:::api
-        WebSocket["WS /ws/stream"]:::api
-    end
-    
-    %% AI/LLM Services
-    subgraph GenAI Subsystem
-        Agent[("GenAI Agent")]:::llm
-        Guardrails[("Output Validator")]:::llm
+    subgraph Interface
+        FastAPI["FastAPI Backend"]:::api
+        ReactUI["Control Center"]:::ui
+        WS["WebSocket Stream"]:::api
     end
 
-    %% Frontend Layer
-    subgraph Dashboard (React/Vite)
-        WebUI["Command Center UI"]:::ui
-    end
-
-    %% Connections
-    RawCSV --> Ingest --> ProcessedPQ
-    ProcessedPQ --> Features --> Train
-    Train --> PredictAPI
-    
-    PredictAPI --> Agent
-    QueryAPI --> Agent
-    VectorDB --> QueryAPI
-    Agent --> Guardrails
-    
-    WebSocket --> WebUI
-    PredictAPI -.-> WebUI
-    QueryAPI <--> WebUI
+    RawCSV --> PQ --> Features --> XGB --> SHAP
+    SHAP --> GenAI
+    VectorDB <--> GenAI
+    GenAI --> FastAPI
+    XGB --> WS --> ReactUI
 ```
 
 ---
 
-## 🛠️ Tech Stack
+## 🔌 API Reference
 
-- **Backend**: Python 3.10+, FastAPI, XGBoost, SHAP, Pandas, Scikit-learn
-- **AI/LLM**: OpenAI/Claude, ChromaDB (Vector Store), LangGraph
-- **Frontend**: React, Vite, TailwindCSS, Recharts, Lucide Icons
-- **Data**: Parquet (Efficient Storage), CSV (Ingestion)
-- **DevOps**: Docker, Docker Compose
+The backend exposes a comprehensive FastAPI suite with Bearer JWT authentication:
 
----
-
-## 📥 Getting Started
-
-### Prerequisites
-- Python 3.10 or higher
-- Node.js & npm
-- Docker (optional, for containerized deployment)
-
-### Local Setup
-
-1. **Clone the Project**
-   ```bash
-   git clone https://github.com/gopu07/SolarMind.git
-   cd SolarMind
-   ```
-
-2. **Backend Configuration**
-   ```bash
-   # Create and activate virtual environment
-   python -m venv venv
-   source venv/bin/activate # Windows: venv\\Scripts\\activate
-
-   # Install dependencies
-   pip install -r requirements.txt
-
-   # Configure environment variables
-   cp .env.example .env
-   # Edit .env and add your OPENAI_API_KEY
-   ```
-
-3. **Data & Model Pipeline**
-   ```bash
-   # Run the full pipeline
-   python scripts/ingest_raw.py
-   python features/pipeline.py
-   python models/train.py
-   python scripts/generate_replay_predictions.py
-   ```
-
-4. **Start the API Server**
-   ```bash
-   uvicorn api.main:app --reload
-   ```
-
-5. **Frontend Setup**
-   ```bash
-   cd dashboard
-   npm install
-   npm run dev
-   ```
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/auth/token` | `POST` | OAuth2 authentication (admin access). |
+| `/predict` | `POST` | High-fidelity inference with narrative generation. |
+| `/query` | `POST` | RAG-powered natural language plant search. |
+| `/inverters` | `GET` | List all inverters with cached latest-state KPI. |
+| `/inverters/{id}/trends` | `GET` | 48-hour trend data for dashboard charts. |
+| `/inverters/{id}/shap` | `GET` | Real-time feature importance (SHAP). |
+| `/ws/stream/{plant_id}` | `WS` | Continuous 60s/2s telemetry replay stream. |
+| `/metrics` | `GET` | Prometheus instrumentation (latencies, counts). |
 
 ---
 
-## 📂 Project Structure
+## 🛠️ Installation & Setup
+
+### 1. Environment Configuration
+Clone the repository and create a `.env` file based on `.env.example`:
+```bash
+git clone https://github.com/gopu07/SolarMind.git
+cd SolarMind
+# Add OPENAI_API_KEY to .env
+```
+
+### 2. The Data Pipeline (Layer 1-3)
+SolarMind requires an 18-month training / 6-month simulation split.
+```bash
+# Ingest and standardise raw telemetry
+python scripts/ingest_raw.py
+
+# Compute feature vectors and train XGBoost
+python features/pipeline.py
+python models/train.py
+
+# Generate precomputed replay predictions for UI performance
+python scripts/generate_replay_predictions.py
+```
+
+### 3. Service Deployment
+```bash
+# Start Backend (Port 8000)
+uvicorn api.main:app --reload
+
+# Start Frontend (Port 5173 - Vite)
+cd dashboard && npm install && npm run dev
+```
+
+---
+
+## 📂 Repository Structure
 
 ```text
-solarmind/
-├── agent/            # LangGraph workflows
-├── api/              # FastAPI application & routers
-├── dashboard/        # React frontend
-├── data/             # Raw & processed datasets
-├── features/         # Feature engineering pipeline
-├── genai/            # LLM prompts & guardrails
-├── models/           # Training & prediction logic
-├── rag/              # RAG ingestion & retrieval
-├── scripts/          # Ingestion & utility scripts
-└── tests/            # Pytest suite
+├── agent/             # Agentic workflows (LangGraph)
+├── api/               # FastAPI layer (Routers, Schemas, Auth)
+├── dashboard/         # React/Tailwind frontend command center
+├── data/              # Raw data in-buffer & Processed Parquet
+├── features/          # Feature engineering (Physics & Benchmarking)
+├── genai/             # LLM Prompts & Pydantic Guardrails
+├── models/            # ML Training & Prediction Logic
+├── rag/               # Vector ingestion & retrieval logic
+├── scripts/           # Ingestion and ingestion-automation scripts
+└── tests/             # Layer-specific Pytest suite (95% coverage goal)
 ```
 
 ---
 
 ## 📄 License
-
-This project is licensed under the [LICENSE](LICENSE) file.
+Licensed under the [MIT License](LICENSE). 
+Designed with ☀️ for the renewable energy future.
