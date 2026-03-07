@@ -51,6 +51,7 @@ class InverterState(BaseModel):
     efficiency: float
     label: int
     top_features: List[Dict[str, float]] = Field(default_factory=list)
+    predicted_failure_hours: Optional[int] = None
 
 class PlantState(BaseModel):
     timestamp: str
@@ -104,6 +105,7 @@ class PredictionResult(BaseModel):
     latency_ms: float
     model_version: str = "1.0"
     timestamp: int
+    predicted_failure_hours: Optional[int] = None
 
 
 class NarrativeRequest(BaseModel):
@@ -208,3 +210,20 @@ class SessionMemory(BaseModel):
     last_inverter: Optional[str] = None
     last_intent: Optional[str] = None
     history: List[Dict[str, str]] = Field(default_factory=list)
+
+# =====================================================================
+# Phase 2.5 Timeline & Maintenance Schemas
+# =====================================================================
+class TimelineEvent(BaseModel):
+    inverter_id: str
+    predicted_failure_time: str
+    predicted_failure_hours: int
+    risk_score: float
+    failure_type: str = "degradation"
+
+class MaintenanceTask(BaseModel):
+    maintenance_id: str
+    inverter_id: str
+    recommended_time: str
+    priority: str = Field(description="'CRITICAL', 'HIGH', or 'MEDIUM'")
+    recommended_action: str

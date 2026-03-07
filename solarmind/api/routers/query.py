@@ -29,6 +29,8 @@ from rag.retriever import hybrid_query
 from rag.state import get_session
 from rag.llm_service import llm_service
 from rag.telemetry_context import format_telemetry_for_prompt
+from api.routers.timeline import get_timeline_events
+from api.routers.maintenance import get_maintenance_schedule
 
 log = structlog.get_logger(__name__)
 
@@ -204,6 +206,24 @@ async def query_rag(req: QueryRequest):
 
             template = _load_v3_prompt()
 
+            # ── Fetch Phase 2.5 Predictive Maintenance Context ─────────────────
+            timeline_events = await get_timeline_events()
+            maintenance_tasks = await get_maintenance_schedule()
+            
+            timeline_context = ""
+            if timeline_events:
+                for ev in timeline_events:
+                    timeline_context += f"- Inverter {ev.inverter_id}: {ev.failure_type} likely in {ev.predicted_failure_hours}h (Risk: {ev.risk_score})\n"
+            else:
+                timeline_context = "No upcoming failures predicted.\n"
+                
+            maintenance_context = ""
+            if maintenance_tasks:
+                for t in maintenance_tasks:
+                    maintenance_context += f"- [{t.priority}] Inverter {t.inverter_id} by {t.recommended_time}: {t.recommended_action}\n"
+            else:
+                maintenance_context = "No scheduled maintenance tasks.\n"
+
             full_prompt = template.format(
                 context_header=context_header,
                 knowledge_context="\n\n".join(context_chunks),
@@ -212,6 +232,8 @@ async def query_rag(req: QueryRequest):
                 historical_context="\n".join(history_parts) if history_parts else "No similar historical events found.",
                 rag_documents=f"{len(results)} documents retrieved via hybrid search.",
                 conversation_history=json.dumps(session.history, indent=2) if session.history else "No previous conversation.",
+                timeline_context=timeline_context,
+                maintenance_context=maintenance_context,
                 question=req.question,
             )
 

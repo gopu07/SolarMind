@@ -134,7 +134,10 @@ async def generate_narrative(req: NarrativeRequest):
     elif req.risk_score > 0.6: risk_level = "HIGH"
     elif req.risk_score > 0.4: risk_level = "MEDIUM"
         
+    from api.state import state_manager
+    inv_state = state_manager.get_inverter_state(req.inverter_id)
+        
     report = get_fallback_report(
-        req.inverter_id, req.plant_id, req.risk_score, risk_level
+        req.inverter_id, req.plant_id, req.risk_score, risk_level, inv_state
     )
     return report

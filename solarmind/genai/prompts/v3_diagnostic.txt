@@ -82,6 +82,12 @@ RAG Retrieved Documents:
 Conversation History:
 {conversation_history}
 
+Predicted Failure Timeline:
+{timeline_context}
+
+Scheduled Maintenance Tasks:
+{maintenance_context}
+
 User Question: {question}
 
 Analyze the above using the 5-step chain-of-thought reasoning process and return the required JSON response.

@@ -42,7 +42,7 @@ SAMPLES_PER_DAY: int = 96  # 24h * 60min / 15min
 RISK_THRESHOLDS: Dict[str, float] = {
     "LOW": 0.3,
     "MEDIUM": 0.6,
-    "HIGH": 0.85,
+    "HIGH": 0.8,
 }
 
 # ── LLM / GenAI ──────────────────────────────────────────────────────

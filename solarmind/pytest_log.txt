@@ -1,0 +1,255 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.10.0, pytest-8.4.2, pluggy-1.6.0
+rootdir: C:\Users\Devraj\Desktop\SolarMind\solarmind
+plugins: anyio-4.11.0, langsmith-0.7.12, asyncio-0.26.0
+asyncio: mode=strict, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 49 items
+
+tests\test_api.py .......                                                [ 14%]
+tests\test_features.py ....                                              [ 22%]
+tests\test_guardrails.py ....                                            [ 30%]
+tests\test_ingest.py ....                                                [ 38%]
+tests\test_labels.py FF                                                  [ 42%]
+tests\test_phase2_state.py ......                                        [ 55%]
+tests\test_rag_advanced.py ......................                        [100%]
+
+================================== FAILURES ===================================
+___________________ test_apply_predictive_labels_multiclass ___________________
+
+self = Index(['timestamp', 'inverter_id', 'plant_id', 'block_id', 'pv1_power',
+       'pv2_power', 'internal_temp', 'ambient_temp', 'inverter_temperature',
+       'meter_active_power'],
+      dtype='object')
+key = 'inverter_alarm_code'
+
+    def get_loc(self, key):
+        """
+        Get integer location, slice or boolean mask for requested label.
+    
+        Parameters
+        ----------
+        key : label
+    
+        Returns
+        -------
+        int if unique index, slice if monotonic index, else mask
+    
+        Examples
+        --------
+        >>> unique_index = pd.Index(list('abc'))
+        >>> unique_index.get_loc('b')
+        1
+    
+        >>> monotonic_index = pd.Index(list('abbc'))
+        >>> monotonic_index.get_loc('b')
+        slice(1, 3, None)
+    
+        >>> non_monotonic_index = pd.Index(list('abcb'))
+        >>> non_monotonic_index.get_loc('b')
+        array([False,  True, False,  True])
+        """
+        casted_key = self._maybe_cast_indexer(key)
+        try:
+>           return self._engine.get_loc(casted_key)
+
+..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\pandas\core\indexes\base.py:3812: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+pandas/_libs/index.pyx:167: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/index.pyx:196: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7088: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   KeyError: 'inverter_alarm_code'
+
+pandas/_libs/hashtable_class_helper.pxi:7096: KeyError
+
+The above exception was the direct cause of the following exception:
+
+    def test_apply_predictive_labels_multiclass():
+        """Predictive labels must assign the correct future fault class."""
+        master = _make_master(n_rows=200) # Ensure enough rows for the 96-sample lookahead window
+    
+        # Introduce a cooling failure fault (label=4) at row 150
+        master.loc[150, "inverter_temperature"] = 90.0
+        master.loc[150, "pv1_power"] = 0.0
+    
+>       labelled = apply_predictive_labels(master)
+
+tests\test_labels.py:37: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scripts\ingest_raw.py:534: in apply_predictive_labels
+    current_class = _identify_fault_class(grp)
+scripts\ingest_raw.py:506: in _identify_fault_class
+    has_alarm = df["inverter_alarm_code"].fillna(0) != 0
+..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\pandas\core\frame.py:4113: in __getitem__
+    indexer = self.columns.get_loc(key)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = Index(['timestamp', 'inverter_id', 'plant_id', 'block_id', 'pv1_power',
+       'pv2_power', 'internal_temp', 'ambient_temp', 'inverter_temperature',
+       'meter_active_power'],
+      dtype='object')
+key = 'inverter_alarm_code'
+
+    def get_loc(self, key):
+        """
+        Get integer location, slice or boolean mask for requested label.
+    
+        Parameters
+        ----------
+        key : label
+    
+        Returns
+        -------
+        int if unique index, slice if monotonic index, else mask
+    
+        Examples
+        --------
+        >>> unique_index = pd.Index(list('abc'))
+        >>> unique_index.get_loc('b')
+        1
+    
+        >>> monotonic_index = pd.Index(list('abbc'))
+        >>> monotonic_index.get_loc('b')
+        slice(1, 3, None)
+    
+        >>> non_monotonic_index = pd.Index(list('abcb'))
+        >>> non_monotonic_index.get_loc('b')
+        array([False,  True, False,  True])
+        """
+        casted_key = self._maybe_cast_indexer(key)
+        try:
+            return self._engine.get_loc(casted_key)
+        except KeyError as err:
+            if isinstance(casted_key, slice) or (
+                isinstance(casted_key, abc.Iterable)
+                and any(isinstance(x, slice) for x in casted_key)
+            ):
+                raise InvalidIndexError(key)
+>           raise KeyError(key) from err
+E           KeyError: 'inverter_alarm_code'
+
+..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\pandas\core\indexes\base.py:3819: KeyError
+_____________________ test_label_source_always_populated ______________________
+
+self = Index(['timestamp', 'inverter_id', 'plant_id', 'block_id', 'pv1_power',
+       'pv2_power', 'internal_temp', 'ambient_temp', 'inverter_temperature',
+       'meter_active_power'],
+      dtype='object')
+key = 'inverter_alarm_code'
+
+    def get_loc(self, key):
+        """
+        Get integer location, slice or boolean mask for requested label.
+    
+        Parameters
+        ----------
+        key : label
+    
+        Returns
+        -------
+        int if unique index, slice if monotonic index, else mask
+    
+        Examples
+        --------
+        >>> unique_index = pd.Index(list('abc'))
+        >>> unique_index.get_loc('b')
+        1
+    
+        >>> monotonic_index = pd.Index(list('abbc'))
+        >>> monotonic_index.get_loc('b')
+        slice(1, 3, None)
+    
+        >>> non_monotonic_index = pd.Index(list('abcb'))
+        >>> non_monotonic_index.get_loc('b')
+        array([False,  True, False,  True])
+        """
+        casted_key = self._maybe_cast_indexer(key)
+        try:
+>           return self._engine.get_loc(casted_key)
+
+..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\pandas\core\indexes\base.py:3812: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+pandas/_libs/index.pyx:167: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/index.pyx:196: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7088: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   KeyError: 'inverter_alarm_code'
+
+pandas/_libs/hashtable_class_helper.pxi:7096: KeyError
+
+The above exception was the direct cause of the following exception:
+
+    def test_label_source_always_populated():
+        """label_source column must never contain null values after apply_predictive_labels."""
+        master = _make_master(n_rows=50) # Not enough for fault logic or lookahead, but sufficient to test fallback
+>       labelled = apply_predictive_labels(master)
+
+tests\test_labels.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scripts\ingest_raw.py:534: in apply_predictive_labels
+    current_class = _identify_fault_class(grp)
+scripts\ingest_raw.py:506: in _identify_fault_class
+    has_alarm = df["inverter_alarm_code"].fillna(0) != 0
+..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\pandas\core\frame.py:4113: in __getitem__
+    indexer = self.columns.get_loc(key)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = Index(['timestamp', 'inverter_id', 'plant_id', 'block_id', 'pv1_power',
+       'pv2_power', 'internal_temp', 'ambient_temp', 'inverter_temperature',
+       'meter_active_power'],
+      dtype='object')
+key = 'inverter_alarm_code'
+
+    def get_loc(self, key):
+        """
+        Get integer location, slice or boolean mask for requested label.
+    
+        Parameters
+        ----------
+        key : label
+    
+        Returns
+        -------
+        int if unique index, slice if monotonic index, else mask
+    
+        Examples
+        --------
+        >>> unique_index = pd.Index(list('abc'))
+        >>> unique_index.get_loc('b')
+        1
+    
+        >>> monotonic_index = pd.Index(list('abbc'))
+        >>> monotonic_index.get_loc('b')
+        slice(1, 3, None)
+    
+        >>> non_monotonic_index = pd.Index(list('abcb'))
+        >>> non_monotonic_index.get_loc('b')
+        array([False,  True, False,  True])
+        """
+        casted_key = self._maybe_cast_indexer(key)
+        try:
+            return self._engine.get_loc(casted_key)
+        except KeyError as err:
+            if isinstance(casted_key, slice) or (
+                isinstance(casted_key, abc.Iterable)
+                and any(isinstance(x, slice) for x in casted_key)
+            ):
+                raise InvalidIndexError(key)
+>           raise KeyError(key) from err
+E           KeyError: 'inverter_alarm_code'
+
+..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\pandas\core\indexes\base.py:3819: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_labels.py::test_apply_predictive_labels_multiclass - KeyErr...
+FAILED tests/test_labels.py::test_label_source_always_populated - KeyError: '...
+======================== 2 failed, 47 passed in 15.42s ========================

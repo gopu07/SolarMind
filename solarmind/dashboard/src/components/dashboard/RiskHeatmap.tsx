@@ -7,9 +7,9 @@ interface RiskHeatmapProps {
 }
 
 function getRiskColor(score: number) {
-  if (score > 0.85) return { bg: "bg-destructive/20", border: "border-destructive/50", text: "text-destructive" };
-  if (score > 0.6) return { bg: "bg-warning/20", border: "border-warning/50", text: "text-warning" };
-  if (score > 0.3) return { bg: "bg-yellow-500/20", border: "border-yellow-500/40", text: "text-yellow-400" };
+  if (score >= 0.8) return { bg: "bg-destructive/20", border: "border-destructive/50", text: "text-destructive" };
+  if (score >= 0.6) return { bg: "bg-warning/20", border: "border-warning/50", text: "text-warning" };
+  if (score >= 0.3) return { bg: "bg-yellow-500/20", border: "border-yellow-500/40", text: "text-yellow-400" };
   return { bg: "bg-primary/20", border: "border-primary/40", text: "text-primary" };
 }
 
@@ -38,7 +38,7 @@ export function RiskHeatmap({ inverters }: RiskHeatmapProps) {
                 {(inv.risk_score * 100).toFixed(0)}%
               </div>
               <div className="text-[10px] text-muted-foreground mt-0.5">{inv.risk_level}</div>
-              {inv.risk_score > 0.85 && (
+              {inv.risk_score >= 0.8 && (
                 <div className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-destructive animate-pulse-glow" />
               )}
             </motion.button>

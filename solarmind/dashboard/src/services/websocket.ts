@@ -42,7 +42,14 @@ class WebSocketService {
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'update' && data.inverters) {
-            const mapped: Inverter[] = data.inverters.map((inv: any) => ({
+            interface WSInverter {
+              inverter_id: string;
+              risk_score: number;
+              temperature: number;
+              efficiency: number;
+              power: number;
+            }
+            const mapped: Inverter[] = data.inverters.map((inv: WSInverter) => ({
               id: inv.inverter_id,
               name: `Inverter ${inv.inverter_id.split('_').pop()}`,
               risk_score: inv.risk_score,

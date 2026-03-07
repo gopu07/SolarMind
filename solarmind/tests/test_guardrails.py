@@ -55,7 +55,7 @@ def test_valid_json_parses_successfully():
         "inverter_id": "INV_1",
         "plant_id": "P1",
         "risk_score": 0.8,
-        "risk_level": "HIGH",
+        "risk_level": "CRITICAL",
         "summary": "Overheating",
         "root_cause": "Fan failure",
         "action": "Replace fan",
@@ -68,4 +68,4 @@ def test_valid_json_parses_successfully():
     })
     report = parse_llm_response(payload, {})
     assert report.inverter_id == "INV_1"
-    assert report.risk_level.value == "HIGH"
+    assert report.risk_level.value == "CRITICAL"

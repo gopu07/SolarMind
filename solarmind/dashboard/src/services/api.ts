@@ -21,7 +21,7 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-let useMock = false;
+const useMock = false;
 
 export async function getInverters(): Promise<Inverter[]> {
   if (useMock) return mockInverters;
@@ -37,13 +37,14 @@ export async function getInverters(): Promise<Inverter[]> {
   }
 }
 
-export async function getInverterReport(id: string): Promise<DiagnosticReport> {
+export async function getInverterReport(id: string): Promise<DiagnosticReport | null> {
   if (useMock) return generateReport(id);
   try {
     const { data } = await api.get(`/inverters/${id}/report`);
     return data;
-  } catch {
-    return generateReport(id);
+  } catch (err) {
+    console.error("[API] getInverterReport failed", err);
+    return null;
   }
 }
 
@@ -52,8 +53,9 @@ export async function getTelemetry(id: string): Promise<TelemetryPoint[]> {
   try {
     const { data } = await api.get(`/inverters/${id}/trends`);
     return data;
-  } catch {
-    return generateTelemetry(id);
+  } catch (err) {
+    console.error("[API] getTelemetry failed", err);
+    return [];
   }
 }
 
@@ -62,8 +64,9 @@ export async function getSHAPValues(id: string): Promise<SHAPValue[]> {
   try {
     const { data } = await api.get(`/inverters/${id}/shap`);
     return data;
-  } catch {
-    return generateSHAPValues(id);
+  } catch (err) {
+    console.error("[API] getSHAPValues failed", err);
+    return [];
   }
 }
 
@@ -72,8 +75,9 @@ export async function getDeltaSHAP(id: string): Promise<DeltaSHAPValue[]> {
   try {
     const { data } = await api.get(`/inverters/${id}/delta-shap`);
     return data;
-  } catch {
-    return generateDeltaSHAP(id);
+  } catch (err) {
+    console.error("[API] getDeltaSHAP failed", err);
+    return [];
   }
 }
 
@@ -89,8 +93,9 @@ export async function queryAI(question: string, sessionId: string = "default"): 
   try {
     const { data } = await api.post("/query", { question, session_id: sessionId });
     return data.response || data.answer || JSON.stringify(data);
-  } catch {
-    return mockChatResponses.default;
+  } catch (err) {
+    console.error("[API] queryAI failed", err);
+    return "AI Assistant is currently unavailable.";
   }
 }
 
@@ -136,6 +141,40 @@ export async function getAlerts(): Promise<Alert[]> {
 export async function getTickets(): Promise<Ticket[]> {
   try {
     const { data } = await api.get("/tickets");
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+export interface TimelineEvent {
+  inverter_id: string;
+  predicted_failure_time: string;
+  predicted_failure_hours: number;
+  risk_score: number;
+  failure_type: string;
+}
+
+export interface MaintenanceTask {
+  maintenance_id: string;
+  inverter_id: string;
+  recommended_time: string;
+  priority: "CRITICAL" | "HIGH" | "MEDIUM";
+  recommended_action: string;
+}
+
+export async function getTimeline(): Promise<TimelineEvent[]> {
+  try {
+    const { data } = await api.get("/timeline");
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+export async function getMaintenanceSchedule(): Promise<MaintenanceTask[]> {
+  try {
+    const { data } = await api.get("/maintenance_schedule");
     return data;
   } catch {
     return [];

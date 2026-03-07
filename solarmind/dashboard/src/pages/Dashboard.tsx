@@ -5,6 +5,8 @@ import { TrendCharts } from "@/components/dashboard/TrendCharts";
 import { DiagnosisCard } from "@/components/dashboard/DiagnosisCard";
 import { AlertPanel } from "@/components/dashboard/AlertPanel";
 import { TicketPanel } from "@/components/dashboard/TicketPanel";
+import { FailureTimeline } from "@/components/dashboard/FailureTimeline";
+import { MaintenanceSchedule } from "@/components/dashboard/MaintenanceSchedule";
 import { getInverters } from "@/services/api";
 import { wsService } from "@/services/websocket";
 import type { Inverter } from "@/data/mockData";
@@ -57,6 +59,15 @@ export default function Dashboard() {
           </div>
           <div className="h-[650px]">
             <TicketPanel />
+          </div>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1">
+            <FailureTimeline />
+          </div>
+          <div className="lg:col-span-2">
+            <MaintenanceSchedule />
           </div>
         </div>
       </div>

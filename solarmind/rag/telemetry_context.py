@@ -31,73 +31,44 @@ def build_telemetry_context(
     inverter_id: Optional[str] = None,
     plant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Load latest telemetry and build structured context for RAG prompts.
+    """Load latest telemetry from PlantStateManager and build structured context for RAG prompts."""
+    from api.state import state_manager
+    state = state_manager.get_state()
+    inverters = state.get("inverters", {})
 
-    Args:
-        inverter_id: Optional specific inverter to focus on.
-        plant_id: Optional plant filter.
+    if not inverters:
+        return {"inverters": [], "summary": "No matching telemetry found in PlantStateManager."}
 
-    Returns:
-        Dict with ``inverters`` list, each containing latest sensor readings.
-    """
-    master_path = config.PROCESSED_DIR / "master_labelled.parquet"
-    if not master_path.exists():
-        log.warning("master_labelled_missing", path=str(master_path))
-        return {"inverters": [], "summary": "No telemetry data available."}
+    selected_inverters = []
+    for inv_id, inv_data in inverters.items():
+        if inverter_id and inv_id != inverter_id:
+            continue
+        if plant_id and inv_data.get("plant_id") != plant_id:
+            continue
+        
+        selected_inverters.append({
+            "inverter_id": inv_id,
+            "plant_id": inv_data.get("plant_id", "UNKNOWN"),
+            "temperature": inv_data.get("temperature"),
+            "power": inv_data.get("power"),
+            "efficiency": inv_data.get("efficiency"),
+            "risk_score": inv_data.get("risk_score"),
+            "anomaly_score": inv_data.get("anomaly_score"),
+            "feature_drivers": inv_data.get("top_features", []),
+            "label": inv_data.get("label", 0)
+        })
 
-    try:
-        df = pd.read_parquet(master_path)
-    except Exception as e:
-        log.error("telemetry_load_failed", error=str(e))
-        return {"inverters": [], "summary": f"Failed to load telemetry: {e}"}
+    summary_parts = [f"Total inverters: {len(selected_inverters)}"]
+    temps = [i["temperature"] for i in selected_inverters if i["temperature"] is not None]
+    if temps:
+        summary_parts.append(f"Avg temp: {sum(temps)/len(temps):.1f}°C, Max temp: {max(temps):.1f}°C")
 
-    # Apply filters
-    if plant_id and "plant_id" in df.columns:
-        df = df[df["plant_id"] == plant_id].copy()
-    if inverter_id and "inverter_id" in df.columns:
-        df = df[df["inverter_id"] == inverter_id].copy()
-
-    if df.empty:
-        return {"inverters": [], "summary": "No matching telemetry found."}
-
-    # Get latest reading per inverter
-    if "timestamp" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        latest = df.sort_values("timestamp").groupby("inverter_id").last().reset_index()
-    else:
-        latest = df.groupby("inverter_id").last().reset_index()
-
-    # Extract key signals
-    signal_cols = [
-        "inverter_id", "plant_id",
-        "pv1_current", "pv1_voltage", "pv1_power",
-        "pv2_current", "pv2_voltage", "pv2_power",
-        "inverter_temperature", "meter_active_power",
-        "meter_pf", "meter_freq",
-        "meter_v_r", "meter_v_y", "meter_v_b",
-        "inverter_alarm_code", "inverter_op_state", "inverter_limit_percent",
-    ]
-    # Add string monitoring columns
-    signal_cols += [f"smu_string{i}" for i in range(1, 25)]
-
-    avail_cols = [c for c in signal_cols if c in latest.columns]
-    inverters = latest[avail_cols].to_dict(orient="records")
-
-    # Compute fleet summary
-    summary_parts = []
-    summary_parts.append(f"Total inverters: {len(inverters)}")
-
-    if "inverter_temperature" in latest.columns:
-        avg_temp = latest["inverter_temperature"].mean()
-        max_temp = latest["inverter_temperature"].max()
-        summary_parts.append(f"Avg temp: {avg_temp:.1f}°C, Max temp: {max_temp:.1f}°C")
-
-    if "meter_active_power" in latest.columns:
-        total_power = latest["meter_active_power"].sum()
-        summary_parts.append(f"Total power: {total_power:.1f}W")
+    powers = [i["power"] for i in selected_inverters if i["power"] is not None]
+    if powers:
+        summary_parts.append(f"Total power: {sum(powers):.1f}W")
 
     return {
-        "inverters": inverters,
+        "inverters": selected_inverters,
         "summary": " | ".join(summary_parts),
     }
 
@@ -105,14 +76,7 @@ def build_telemetry_context(
 def detect_anomalies(
     telemetry: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    """Flag sensor readings outside normal bounds.
-
-    Args:
-        telemetry: Single inverter telemetry dict.
-
-    Returns:
-        List of anomaly dicts with ``signal``, ``value``, ``severity``, ``threshold``.
-    """
+    """Flag sensor readings outside normal bounds."""
     anomalies = []
 
     for signal, bounds in ANOMALY_THRESHOLDS.items():
@@ -192,15 +156,7 @@ def format_telemetry_for_prompt(
     inverter_id: Optional[str] = None,
     plant_id: Optional[str] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
-    """Build a complete telemetry context string for prompt injection.
-
-    Args:
-        inverter_id: Optional inverter filter.
-        plant_id: Optional plant filter.
-
-    Returns:
-        Tuple of (formatted_string, all_anomalies).
-    """
+    """Build a complete telemetry context string for prompt injection."""
     context = build_telemetry_context(inverter_id, plant_id)
 
     if not context["inverters"]:
@@ -211,40 +167,36 @@ def format_telemetry_for_prompt(
 
     for inv in context["inverters"]:
         inv_id = inv.get("inverter_id", "UNKNOWN")
-        anomalies = detect_anomalies(inv)
+        
+        # Map back to anomaly detection keys
+        mapped_inv = {
+            "inverter_temperature": inv.get("temperature"),
+            "pv1_power": inv.get("power"),
+            "conversion_efficiency": inv.get("efficiency")
+        }
+        anomalies = detect_anomalies(mapped_inv)
         all_anomalies.extend(anomalies)
 
-        parts.append(f"\n### Inverter {inv_id}")
-
-        # Key signals
-        key_signals = [
-            ("Temperature", inv.get("inverter_temperature"), "°C"),
-            ("PV1 Power", inv.get("pv1_power"), "W"),
-            ("PV2 Power", inv.get("pv2_power"), "W"),
-            ("Grid Power", inv.get("meter_active_power"), "W"),
-            ("Efficiency", inv.get("conversion_efficiency"), ""),
-            ("Op State", inv.get("inverter_op_state"), ""),
-            ("Alarm Code", inv.get("inverter_alarm_code"), ""),
-            ("Grid Freq", inv.get("meter_freq"), "Hz"),
-            ("Limit %", inv.get("inverter_limit_percent"), "%"),
-        ]
-        for name, val, unit in key_signals:
-            if val is not None and not pd.isna(val):
-                parts.append(f"- {name}: {val}{unit}")
-
-        # String currents (compact)
-        string_vals = []
-        for i in range(1, 25):
-            sv = inv.get(f"smu_string{i}")
-            if sv is not None and not pd.isna(sv):
-                string_vals.append(f"S{i}={float(sv):.2f}A")
-        if string_vals:
-            parts.append(f"- String Currents: {', '.join(string_vals)}")
+        parts.append(f"### Inverter {inv_id}")
+        
+        import json
+        telemetry_json = {
+            "inverter_id": inv_id,
+            "temperature": inv.get("temperature"),
+            "efficiency": inv.get("efficiency"),
+            "power": inv.get("power"),
+            "risk_score": inv.get("risk_score"),
+            "anomaly_score": inv.get("anomaly_score"),
+            "feature_drivers": inv.get("feature_drivers")
+        }
+        parts.append("```json\n" + json.dumps(telemetry_json, indent=2) + "\n```")
 
         # Anomalies for this inverter
         if anomalies:
-            parts.append(f"\n⚠️ ANOMALIES DETECTED ({len(anomalies)}):")
+            parts.append(f"⚠️ ANOMALIES DETECTED ({len(anomalies)}):")
             for a in anomalies:
                 parts.append(f"  - [{a['severity']}] {a['description']}")
+                
+        parts.append("\n")
 
     return "\n".join(parts), all_anomalies

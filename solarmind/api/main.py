@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 import config
 from api.auth import create_access_token, get_current_user
 from api.schemas.models import Token, PredictRequest, PredictionResult, NarrativeRequest, HealthResponse
-from api.routers import health, predict, query, alerts, tickets
+from api.routers import health, predict, query, alerts, tickets, timeline, maintenance
 from models.predict import predict_inverter
 from genai.guardrails.validator import get_fallback_report
 
@@ -64,9 +64,6 @@ class ConnectionManager:
                     pass
 
 manager = ConnectionManager()
-_inverter_list_cache = None
-_cache_timestamp = 0
-CACHE_TTL = 300
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -134,6 +131,8 @@ app.include_router(predict.router)
 app.include_router(query.router)
 app.include_router(alerts.router)
 app.include_router(tickets.router)
+app.include_router(timeline.router)
+app.include_router(maintenance.router)
 
 
 from api.schemas.models import ModelMetricsResponse
@@ -202,7 +201,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 
 
 @app.get("/inverters/{inverter_id}/report", tags=["GenAI"])
-async def get_cached_report(inverter_id: str):
+async def get_dynamic_report(inverter_id: str):
     """Generate dynamic AI report for the dashboard."""
     from genai.guardrails.validator import get_fallback_report
     from api.state import state_manager
@@ -223,7 +222,7 @@ async def get_cached_report(inverter_id: str):
         else: risk_level = "LOW"
             
     report_obj = get_fallback_report(
-        inverter_id, plant_id, risk_score, risk_level
+        inverter_id, plant_id, risk_score, risk_level, inv_state
     )
     return report_obj
 
@@ -291,9 +290,11 @@ async def get_inverter_trends(inverter_id: str):
     for _, row in df.iterrows():
         trends.append({
             "time": row["timestamp"].strftime("%H:%M"),
+            "timestamp": row["timestamp"].isoformat(),
             "temperature": float(row["inverter_temperature"]) if pd.notna(row["inverter_temperature"]) else 0.0,
             "power": float(row["pv1_power"]) if pd.notna(row["pv1_power"]) else 0.0,
-            "efficiency": float(row.get("conversion_efficiency", 0)) if pd.notna(row.get("conversion_efficiency", 0)) else 0.0,
+            "efficiency": float(row.get("conversion_efficiency", 0)) * 100 if pd.notna(row.get("conversion_efficiency", 0)) else 0.0,
+            "string_mismatch": float(row.get("string_mismatch_std", 0.0)) if pd.notna(row.get("string_mismatch_std", 0.0)) else 0.0,
             "risk": float(row.get("risk_score", 0))
         })
         
@@ -386,8 +387,8 @@ async def websocket_push_loop():
         master_df = pd.read_parquet(master_path, columns=["inverter_id", "plant_id"])
         
         # We will track plant_id mappings locally for WS broadcasting
-        plant_to_inv = {}
-        initial_state = {"inverters": {}}
+        plant_to_inv: Dict[str, list[str]] = {}
+        initial_state: Dict[str, Any] = {"inverters": {}}
         for plant_id in master_df["plant_id"].unique():
             plant_inverters = master_df[master_df["plant_id"] == plant_id]["inverter_id"].unique()
             plant_to_inv[plant_id] = list(plant_inverters)
@@ -423,14 +424,14 @@ async def websocket_push_loop():
             ts_iso = pd.Timestamp(current_ts).isoformat()
             
             # 1. Update global state with the new data slice
-            updates = {"timestamp": ts_iso, "inverters": {}}
+            updates: Dict[str, Any] = {"timestamp": ts_iso, "inverters": {}}
             for _, row in ts_data.iterrows():
                 try:
                     top_features = json.loads(row["top_shap_features"]) if pd.notna(row["top_shap_features"]) else []
                 except:
                     top_features = []
                     
-                inv_update = {
+                inv_update: Dict[str, Any] = {
                     "inverter_id": row["inverter_id"],
                     "plant_id": row["plant_id"],
                     "risk_score": float(row["risk_score"]) if pd.notna(row["risk_score"]) else 0.0,
@@ -438,8 +439,18 @@ async def websocket_push_loop():
                     "power": float(row["pv1_power"]) if pd.notna(row["pv1_power"]) else 0.0,
                     "efficiency": float(row.get("conversion_efficiency", 0.0)) if pd.notna(row.get("conversion_efficiency", 0.0)) else 0.0,
                     "label": int(row["label"]) if pd.notna(row["label"]) else 0,
-                    "top_features": top_features
+                    "top_features": top_features,
+                    "predicted_failure_hours": None
                 }
+                
+                # Heuristic for Time-to-Failure (TTF)
+                if inv_update["risk_score"] > 0.8:
+                    if inv_update["temperature"] > 55.0:
+                        inv_update["predicted_failure_hours"] = 12
+                    else:
+                        inv_update["predicted_failure_hours"] = 24
+                elif inv_update["risk_score"] > 0.6:
+                    inv_update["predicted_failure_hours"] = 48
                 
                 if "anomaly_score" in row:
                     inv_update["anomaly_score"] = float(row["anomaly_score"]) if pd.notna(row["anomaly_score"]) else 0.0
@@ -454,12 +465,13 @@ async def websocket_push_loop():
             current_state = state_manager.get_state()
             
             for plant_id in list(manager.active_connections.keys()):
-                if not manager.active_connections[plant_id] or plant_id not in plant_to_inv:
+                inverters_in_plant = plant_to_inv.get(plant_id, [])
+                if not manager.active_connections[plant_id] or not inverters_in_plant:
                     continue
                     
                 plant_inverters = [
                     current_state["inverters"][inv] 
-                    for inv in plant_to_inv[plant_id] 
+                    for inv in inverters_in_plant 
                     if inv in current_state["inverters"]
                 ]
                 

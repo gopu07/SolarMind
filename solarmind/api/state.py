@@ -27,12 +27,9 @@ class PlantStateManager:
             self.plant_state["timestamp"] = updates["timestamp"]
             
         if "inverters" in updates:
-            # We don't overwrite the whole dict, we update existing inverters
-            # This ensures if a partial update comes in, we don't lose other inverters
+            # We overwrite the inverter data to ensure no stale state persists
             for inv_id, inv_data in updates["inverters"].items():
-                if inv_id not in self.plant_state["inverters"]:
-                    self.plant_state["inverters"][inv_id] = {}
-                self.plant_state["inverters"][inv_id].update(inv_data)
+                self.plant_state["inverters"][inv_id] = inv_data
                 
             self.plant_state["inverter_count"] = len(self.plant_state["inverters"])
             

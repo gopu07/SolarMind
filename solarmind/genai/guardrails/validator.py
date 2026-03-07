@@ -105,7 +105,8 @@ class InverterReport(BaseModel):
 # Retry and Fallback Logic
 # =====================================================================
 def get_fallback_report(
-    inverter_id: str, plant_id: str, risk_score: float, risk_level: str
+    inverter_id: str, plant_id: str, risk_score: float, risk_level: str,
+    inv_state: Optional[Dict[str, Any]] = None
 ) -> InverterReport:
     """Generate a safe, rule-based fallback report.
 
@@ -116,6 +117,7 @@ def get_fallback_report(
         plant_id: Plant ID.
         risk_score: Base predicted risk score.
         risk_level: Base predicted risk level.
+        inv_state: Dict with telemetry variables (optional).
 
     Returns:
         Valid InverterReport fallback object.
@@ -125,15 +127,37 @@ def get_fallback_report(
     # Ensure risk level is strictly matched to score for the fallback
     valid_risk_level = config.risk_level_from_score(risk_score)
 
-    fallback_text = "LLM unavailable — rule-based summary"
+    if inv_state:
+        temp = float(inv_state.get("temperature", 0.0))
+        eff = float(inv_state.get("efficiency", 0.0))
+        power = float(inv_state.get("power", 0.0))
+        risk_pct = int(risk_score * 100)
+        
+        if valid_risk_level == "CRITICAL":
+            summary = f"Inverter {inverter_id} shows critical risk ({risk_pct}%). Temperature is {temp:.1f}°C and efficiency is dropping to {eff*100:.1f}%. Predicted failure soon."
+            root_cause = "Severe cooling degradation or hardware fault detected."
+            action = "Dispatch technician immediately for cooling system inspection."
+        elif valid_risk_level == "HIGH":
+            summary = f"Inverter {inverter_id} is operating at high risk ({risk_pct}%). Elevated temperature ({temp:.1f}°C) and degraded efficiency ({eff*100:.1f}%) observed."
+            root_cause = "Potential thermal stress or incipient component failure."
+            action = "Schedule maintenance review and clean filters."
+        else:
+            summary = f"Inverter {inverter_id} is healthy. Operating efficiently at {eff*100:.1f}% with stable temperature ({temp:.1f}°C), delivering {power/1000:.1f}kW power."
+            root_cause = "Normal operation parameters observed."
+            action = "Continue routine monitoring."
+    else:
+        summary = "LLM unavailable — rule-based summary"
+        root_cause = summary
+        action = summary
+
     return InverterReport(
         inverter_id=inverter_id,
         plant_id=plant_id,
         risk_score=risk_score,
         risk_level=valid_risk_level,
-        summary=fallback_text,
-        root_cause=fallback_text,
-        action=fallback_text,
+        summary=summary,
+        root_cause=root_cause,
+        action=action,
         confidence=ConfidenceLevel.LOW,
         data_quality=DataQuality.PARTIAL,
         delta_shap_available=False,
