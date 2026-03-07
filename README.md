@@ -24,7 +24,13 @@ By unpivoting complex, multi-dimensional datalogger telemetry and applying local
 ### 3. Generative AI & RAG (Layers 4 & 5)
 - **Grounded Narrative Generation**: LLM-based diagnostics grounded in a strict **Fault Isolation Logic** matrix (e.g., MPPT Imbalance vs. Thermal Disconnect).
 - **ChromaDB Vector Store**: A 90-day rolling window of maintenance logs and prediction reports, enabling natural-language querying of plant history.
+- **Multi-Turn Memory**: Session-based context tracking for dynamic follow-up questions and deeper diagnostic exploration.
 - **Pydantic Guardrails**: Ensuring all GenAI outputs follow strictly typed industrial reporting schemas.
+
+### 4. Alert & Maintenance Engine (Phase 2 Additions)
+- **Alert Management System**: Real-time evaluation of risk scores crossing predictive thresholds (Warning > 0.6, Critical > 0.8) to generate active alerts.
+- **Automated Ticket Generation**: Diagnostic ticketing engine that infers suspected issues and recommended actions based on anomaly causal drivers (SHAP block structures).
+- **Dashboard Intelligence Panels**: Dynamic React front-end components visualizing active alerts, draft tickets, risk heatmaps, and 48-hour diagnostic trends continuously.
 
 ---
 
@@ -80,8 +86,10 @@ The backend exposes a comprehensive FastAPI suite built strictly on **Pydantic V
 | `/model/metrics` | `GET` | Multiclass model performance metrics (Macro F1, ROC-AUC). |
 | `/predict` | `POST` | High-fidelity inference returning Multi-class predictions, Anomaly scores, and Risk blending. |
 | `/explain/{id}` | `GET` | Raw SHAP Waterfall arrays, Summary plots, and LIME weights for charting. |
-| `/query` | `POST` | RAG-powered natural language plant search. |
+| `/query` | `POST` | RAG-powered natural language plant search + multi-turn conversational memory. |
 | `/inverters` | `GET` | List all inverters via centralized in-memory `PlantStateManager`. |
+| `/alerts` | `GET` | Retrieve active hardware and operational alerts based on predictive risk thresholds. |
+| `/tickets` | `GET` | Auto-generated maintenance ticket recommendations derived from critical faults. |
 | `/inverters/{id}/trends` | `GET` | 48-hour trend data for dashboard charts. |
 | `/ws/stream/{plant_id}` | `WS` | Continuous telemetry replay stream broadcasting stable state payloads. |
 

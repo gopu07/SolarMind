@@ -79,6 +79,9 @@ Historical Similar Events:
 RAG Retrieved Documents:
 {rag_documents}
 
+Conversation History:
+{conversation_history}
+
 User Question: {question}
 
 Analyze the above using the 5-step chain-of-thought reasoning process and return the required JSON response.

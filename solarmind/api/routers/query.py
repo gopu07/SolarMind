@@ -169,7 +169,7 @@ async def query_rag(req: QueryRequest):
         anomaly_summary = f"{len(anomalies)} anomalies detected:\n" + "\n".join(anomaly_lines)
 
     # ── Session state ─────────────────────────────────────────────────
-    session = get_session()
+    session = get_session(req.session_id)
     if inverter_id:
         session.last_inverter = inverter_id
         session.last_intent = "inverter_diagnostics"
@@ -211,6 +211,7 @@ async def query_rag(req: QueryRequest):
                 anomaly_summary=anomaly_summary,
                 historical_context="\n".join(history_parts) if history_parts else "No similar historical events found.",
                 rag_documents=f"{len(results)} documents retrieved via hybrid search.",
+                conversation_history=json.dumps(session.history, indent=2) if session.history else "No previous conversation.",
                 question=req.question,
             )
 
@@ -242,6 +243,12 @@ async def query_rag(req: QueryRequest):
             else:
                 # Fallback: use raw LLM text
                 answer = raw_answer
+
+            # Append to history
+            session.history.append({"role": "user", "content": req.question})
+            session.history.append({"role": "assistant", "content": answer})
+            if len(session.history) > 10:
+                session.history = session.history[-10:]
 
         except Exception as e:
             log.warning("llm_qa_failed", error=str(e))

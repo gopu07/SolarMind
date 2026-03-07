@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 import config
 from api.auth import create_access_token, get_current_user
 from api.schemas.models import Token, PredictRequest, PredictionResult, NarrativeRequest, HealthResponse
-from api.routers import health, predict, query
+from api.routers import health, predict, query, alerts, tickets
 from models.predict import predict_inverter
 from genai.guardrails.validator import get_fallback_report
 
@@ -132,6 +132,8 @@ async def instrumentation_middleware(request: Request, call_next):
 # app.include_router(health.router)  # Replaced by inline endpoints
 app.include_router(predict.router)
 app.include_router(query.router)
+app.include_router(alerts.router)
+app.include_router(tickets.router)
 
 
 from api.schemas.models import ModelMetricsResponse

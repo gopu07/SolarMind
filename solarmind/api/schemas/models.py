@@ -177,3 +177,34 @@ class QueryResponse(BaseModel):
     diagnostic_report: Optional[DiagnosticReport] = None
     retrieval_stats: Optional[Dict[str, Any]] = None
     latency_ms: float
+
+# =====================================================================
+# Alert & Ticket Schemas (Phase 2)
+# =====================================================================
+class Alert(BaseModel):
+    id: str
+    inverter_id: str
+    plant_id: str
+    risk_score: float
+    level: str = Field(description="'warning' or 'critical'")
+    message: str
+    timestamp: str
+
+class Ticket(BaseModel):
+    id: str
+    inverter_id: str
+    plant_id: str
+    risk_score: float
+    suspected_issue: str
+    recommended_action: str
+    status: str = Field(default="open")
+    created_at: str
+
+# =====================================================================
+# Memory / Session Schemas (Phase 2)
+# =====================================================================
+class SessionMemory(BaseModel):
+    session_id: str
+    last_inverter: Optional[str] = None
+    last_intent: Optional[str] = None
+    history: List[Dict[str, str]] = Field(default_factory=list)
