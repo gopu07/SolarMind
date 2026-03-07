@@ -4,6 +4,7 @@ import { RiskHeatmap } from "@/components/dashboard/RiskHeatmap";
 import { TrendCharts } from "@/components/dashboard/TrendCharts";
 import { DiagnosisCard } from "@/components/dashboard/DiagnosisCard";
 import { AlertPanel } from "@/components/dashboard/AlertPanel";
+import { DriftPanel } from "@/components/dashboard/DriftPanel";
 import { TicketPanel } from "@/components/dashboard/TicketPanel";
 import { FailureTimeline } from "@/components/dashboard/FailureTimeline";
 import { MaintenanceSchedule } from "@/components/dashboard/MaintenanceSchedule";
@@ -47,8 +48,11 @@ export default function Dashboard() {
           <div className="lg:col-span-2">
             <RiskHeatmap inverters={inverters} />
           </div>
-          <div className="h-[400px]">
-            <AlertPanel />
+          <div className="space-y-6">
+            <DriftPanel />
+            <div className="h-[280px] overflow-hidden">
+              <AlertPanel />
+            </div>
           </div>
         </div>
 
