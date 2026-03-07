@@ -90,6 +90,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:8080",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
@@ -426,6 +427,7 @@ async def websocket_push_loop():
             
             ts_data = df[df["timestamp"] == current_ts]
             ts_iso = pd.Timestamp(current_ts).isoformat()
+            log.info("broadcasting_telemetry", timestamp=ts_iso, active_clients=sum(len(c) for c in manager.active_connections.values()))
             
             # 1. Update global state with the new data slice
             updates: Dict[str, Any] = {"timestamp": ts_iso, "inverters": {}}
