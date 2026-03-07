@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: solarmind-api
     ports:
       - "8000:8000"
@@ -10,12 +12,14 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LOG_LEVEL=INFO
     volumes:
-      - .:/app
+      - ./solarmind:/app
     networks:
       - solarmind-network
 
   dashboard:
-    build: ./dashboard
+    build:
+      context: ./solarmind/dashboard
+      dockerfile: Dockerfile
     container_name: solarmind-dashboard
     ports:
       - "5173:80"

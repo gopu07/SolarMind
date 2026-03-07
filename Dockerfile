@@ -2,10 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+# The build context is now the root of the repo
+COPY solarmind/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy the entire solarmind directory into /app
+COPY solarmind/ .
 
 EXPOSE 8000
 

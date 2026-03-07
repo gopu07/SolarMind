@@ -18,7 +18,8 @@ from contextlib import asynccontextmanager
 import config
 from api.auth import create_access_token, get_current_user
 from api.schemas.models import Token, PredictRequest, PredictionResult, NarrativeRequest, HealthResponse
-from api.routers import health, predict, query, alerts, tickets, timeline, maintenance, model
+from api.routers import health, predict, query, alerts, tickets, timeline, maintenance, model, config as config_router
+from app_config.settings import settings, print_config_status
 from models.predict import predict_inverter
 from genai.guardrails.validator import get_fallback_report
 
@@ -68,6 +69,7 @@ manager = ConnectionManager()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle events."""
+    print_config_status()
     # Spawn background task to push WS updates every 60s
     task = asyncio.create_task(websocket_push_loop())
     yield
@@ -134,6 +136,7 @@ app.include_router(tickets.router)
 app.include_router(timeline.router)
 app.include_router(maintenance.router)
 app.include_router(model.router)
+app.include_router(config_router.router)
 
 
 from api.schemas.models import ModelMetricsResponse
