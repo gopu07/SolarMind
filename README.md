@@ -2,50 +2,47 @@
 
 **SolarMind** is a production-ready, industrial AI platform designed for predictive maintenance, fault isolation, and operational intelligence in utility-scale solar PV plants. 
 
-By unpivoting complex, multi-dimensional datalogger telemetry and applying localized XGBoost modeling, SolarMind identifies equipment degradation signatures *days* before they manifest as critical failures.
+By unpivoting complex, multi-dimensional datalogger telemetry and applying localized XGBoost ensemble modeling, SolarMind identifies equipment degradation signatures *days* before they manifest as critical failures.
 
 ---
 
-## 🚀 Recent Updates (System Repairs)
-The SolarMind platform has undergone a comprehensive system repair to ensure robust data integrity, real-time metrics, and reliable AI diagnostics:
-- **Risk Score Pipeline**: Refactored ML pipelines to preserve continuous probability outputs (0.0 to 1.0) and corrected risk thresholds.
-- **Unified Data State**: Implemented a global `PlantStateManager` to serve as a single source of truth for all APIs, WebSocket broadcasts, and RAG contexts.
-- **Frontend Architecture**: Transitioned the React dashboard to a centralized Zustand store (`useStore.ts`) for synchronized, real-time telemetry rendering (Heatmaps, KPI Cards, Alerts).
-- **Dynamic AI Assistant**: Replaced static fallback diagnostics with a telemetry-driven engine that grounds RAG responses in live inverter conditions (Temperature, Power, Efficiency).
+## 🖼️ Control Center Preview
+Below is the high-fidelity operational view of the platform, featuring real-time risk heatmapping, AI-driven diagnostics, and the new **Live Model Drift Monitor**.
+
+![SolarMind Operational Dashboard](docs/images/dashboard_v3.png)
+
+---
+
+## 🚀 Recent Industrial Upgrades
+The SolarMind platform has been hardened for enterprise deployment with a focus on reliability and observability:
+- **Model Drift Detection**: Real-time Z-score monitoring of feature distributions (`temperature`, `power`, `efficiency`) against 18-month historical baselines to ensure model integrity.
+- **Docker Containerization**: Full-stack orchestration using Docker and Docker Compose, segregating the FastAPI backend and Nginx-served Vite frontend.
+- **Automated CI/CD**: Integrated GitHub Actions pipeline validating every commit via `pytest` (backend) and `vitest` (frontend).
+- **Unified State Management**: Centralized `PlantStateManager` (Backend) and `Zustand` (Frontend) ensuring a single source of truth for all real-time telemetry.
 
 ---
 
 ## 💎 Core Capabilities
 
 ### 1. Heterogeneous Ensemble Engine (Layer 3)
-- **Multi-Model Ensemble**: A weighted voting ensemble combining **XGBoost (50%)**, **LightGBM (30%)**, and **CatBoost (20%)** to maximize predictive stability and handle multivariate sensor noise.
-- **Multiclass Fault Classification**: Transitioned from binary models to a 5-class predictive system identifying: Normal, Thermal Issues, String Mismatch, Grid Instability, and Cooling Failures.
-- **Unsupervised Anomaly Detection**: Integrated **Isolation Forest** trained on stable telemetry to catch unknown failure modes, blended with supervised probabilities into a unified hybrid risk score.
-- **Calibrated Probability**: Platt scaling (sigmoid calibration) applied to the ensemble output to ensure risk scores represent true failure probabilities.
-- **Explainable AI (XAI)**: Integrated **SHAP** and **LIME** local surrogates to extract granular feature contributions specifically driving the *predicted class*.
+- **Multi-Model Ensemble**: A weighted voting ensemble combining **XGBoost (50%)**, **LightGBM (30%)**, and **CatBoost (20%)** to maximize predictive stability.
+- **Multiclass Fault Classification**: Identifies: Normal, Thermal Issues, String Mismatch, Grid Instability, and Cooling Failures.
+- **Calibrated Probability**: Platt scaling applied to ensemble outputs to ensure risk scores represent true statistical failure probabilities.
+- **Explainable AI (XAI)**: Integrated **SHAP** local surrogates to extract granular feature contributions specifically driving each prediction.
 
 ### 2. Feature Engineering Pipeline (Layer 2)
-- **Physics-Derived Features**: Real-time compute of **Conversion Efficiency** and **Thermal Gradients** clip-detected for nighttime thresholds.
-- **Plant-Context Benchmarking**: Dynamic ranking of inverters (power, temperature, efficiency) against the real-time average of their respective plants to isolate local faults.
-- **Temporal & Variance Features**: Deep historical context via robust rolling windows (`temperature_mean_6h`, `power_trend_24h`), `string_current_variance`, and `relative_power`.
-- **Cyclical Encoding**: Fourier transforms applied to temporal variables (`hour`, `month`, `day_of_year`) to capture solar irradiance cycles.
+- **Physics-Derived Features**: Real-time compute of **Conversion Efficiency** and **Thermal Gradients**.
+- **Plant-Context Benchmarking**: Dynamic ranking of inverters against real-time averages of their respective plants to isolate local faults.
+- **Cyclical Encoding**: Fourier transforms applied to temporal variables (`hour`, `day_of_year`) to capture solar irradiance cycles.
 
 ### 3. Generative AI & RAG (Layers 4 & 5)
-- **Grounded Narrative Generation**: LLM-based diagnostics grounded in a strict **Fault Isolation Logic** matrix (e.g., MPPT Imbalance vs. Thermal Disconnect).
-- **ChromaDB Vector Store**: A 90-day rolling window of maintenance logs and prediction reports, enabling natural-language querying of plant history.
-- **Multi-Turn Memory**: Session-based context tracking for dynamic follow-up questions and deeper diagnostic exploration.
+- **Grounded Narrative Generation**: LLM-based diagnostics grounded in a strict **Fault Isolation Logic** matrix.
+- **ChromaDB Vector Store**: A rolling window of maintenance logs and prediction reports for natural-language site querying.
 - **Pydantic Guardrails**: Ensuring all GenAI outputs follow strictly typed industrial reporting schemas.
-
-### 4. Alert & Maintenance Engine (Phase 2 Additions)
-- **Alert Management System**: Real-time evaluation of risk scores crossing predictive thresholds (Warning > 0.6, Critical > 0.8) to generate active alerts.
-- **Automated Ticket Generation**: Diagnostic ticketing engine that infers suspected issues and recommended actions based on anomaly causal drivers (SHAP block structures).
-- **Dashboard Intelligence Panels**: Dynamic React front-end components visualizing active alerts, draft tickets, risk heatmaps, and 48-hour diagnostic trends continuously.
 
 ---
 
 ## 🏗️ System Architecture
-
-SolarMind is built using a strict 10-layer decoupled architecture:
 
 ```mermaid
 graph TD
@@ -64,8 +61,8 @@ graph TD
 
     subgraph Intelligence
         Features[("Pipeline Engine")]:::pipeline
-        XGB[("XGBoost Model")]:::pipeline
-        SHAP[("SHAP Inference")]:::pipeline
+        Ensemble[("Tree Ensemble")]:::pipeline
+        Drift[("Drift Monitor")]:::pipeline
         GenAI[("GenAI Agent")]:::llm
     end
 
@@ -75,83 +72,59 @@ graph TD
         WS["WebSocket Stream"]:::api
     end
 
-    RawCSV --> PQ --> Features --> XGB --> SHAP
-    SHAP --> GenAI
-    VectorDB <--> GenAI
-    GenAI --> FastAPI
-    XGB --> WS --> ReactUI
+    RawCSV --> PQ --> Features --> Ensemble
+    Features --> Drift --> FastAPI
+    Ensemble --> WS --> ReactUI
+    GenAI <--> VectorDB
+    FastAPI <--> GenAI
 ```
 
 ---
 
 ## 🔌 API Reference
 
-The backend exposes a comprehensive FastAPI suite built strictly on **Pydantic V2**, with Bearer JWT authentication:
-
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
-| `/auth/token` | `POST` | OAuth2 authentication (admin access). |
-| `/health` | `GET` | System uptime, WebSocket clients, and ML model memory load status. |
-| `/model/metrics` | `GET` | Multiclass model performance metrics (Macro F1, ROC-AUC). |
-| `/predict` | `POST` | High-fidelity inference returning Multi-class predictions, Anomaly scores, and Risk blending. |
-| `/explain/{id}` | `GET` | Raw SHAP Waterfall arrays, Summary plots, and LIME weights for charting. |
-| `/query` | `POST` | RAG-powered natural language plant search + multi-turn conversational memory. |
-| `/inverters` | `GET` | List all inverters via centralized in-memory `PlantStateManager`. |
-| `/alerts` | `GET` | Retrieve active hardware and operational alerts based on predictive risk thresholds. |
-| `/tickets` | `GET` | Auto-generated maintenance ticket recommendations derived from critical faults. |
-| `/inverters/{id}/trends` | `GET` | 48-hour trend data for dashboard charts. |
-| `/ws/stream/{plant_id}` | `WS` | Continuous telemetry replay stream broadcasting stable state payloads. |
+| `/predict` | `POST` | High-fidelity inference (Multi-class + Anomaly). |
+| `/model/drift` | `GET` | Real-time Z-score distribution analysis vs baseline. |
+| `/model/metrics` | `GET` | Multiclass model performance (Macro F1: 0.7874). |
+| `/query` | `POST` | RAG-powered natural language plant search. |
+| `/ws/stream/` | `WS` | Real-time telemetry broadcast via State Manager. |
 
 ---
 
 ## 🛠️ Installation & Setup
 
-### 1. Environment Configuration
-Clone the repository and create a `.env` file based on `.env.example`:
+### 1. Docker (Recommended)
 ```bash
-git clone https://github.com/gopu07/SolarMind.git
-cd SolarMind
-# Add OPENAI_API_KEY to .env
+docker-compose up --build
 ```
 
-### 2. The Data Pipeline (Layer 1-3)
-SolarMind requires an 18-month training / 6-month simulation split.
+### 2. Manual Setup
 ```bash
-# Ingest and standardise raw telemetry
-python scripts/ingest_raw.py
-
-# Compute feature vectors and train XGBoost
-python features/pipeline.py
-python models/train.py
-
-# Generate precomputed replay predictions for UI performance
-python scripts/generate_replay_predictions.py
-```
-
-### 3. Service Deployment
-```bash
-# Start Backend (Port 8000)
+# Backend
+cd solarmind
+pip install -r requirements.txt
 uvicorn api.main:app --reload
 
-# Start Frontend (Port 5173 - Vite)
-cd dashboard && npm install && npm run dev
+# Frontend
+cd solarmind/dashboard
+npm install
+npm run dev
 ```
 
 ---
 
 ## 📂 Repository Structure
-
 ```text
-├── agent/             # Agentic workflows (LangGraph)
-├── api/               # FastAPI layer (Routers, Schemas, Auth)
-├── dashboard/         # React/Tailwind frontend command center
-├── data/              # Raw data in-buffer & Processed Parquet
-├── features/          # Feature engineering (Physics & Benchmarking)
-├── genai/             # LLM Prompts & Pydantic Guardrails
-├── models/            # ML Training & Prediction Logic
-├── rag/               # Vector ingestion & retrieval logic
-├── scripts/           # Ingestion and ingestion-automation scripts
-└── tests/             # Layer-specific Pytest suite (95% coverage goal)
+├── .github/workflows/ # GitHub CI Automation
+├── solarmind/
+│   ├── api/          # FastAPI layer (Routers, State, Auth)
+│   ├── dashboard/    # React/Vite/Zustand Dashboard
+│   ├── features/     # Engineering (Physics & Benchmarking)
+│   ├── models/       # ML Ensemble & Drift Logic
+│   ├── rag/          # Vector Store & Context Logic
+│   └── tests/        # Pytest & Vitest Suites (100% Pass)
 ```
 
 ---
