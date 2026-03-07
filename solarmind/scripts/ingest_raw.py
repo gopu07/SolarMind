@@ -487,15 +487,16 @@ def _identify_fault_class(df: pd.DataFrame) -> pd.Series:
     # Cooling failure: Extremely high temp (e.g. > 85) while power is low
     cooling_fail = (temp > 85) & (power < 1000)
     # Thermal issue: High temp (e.g. > 70)
-    thermal = (temp > 70)
+    # Thermal issue: Very high temp (e.g. > 82)
+    thermal = (temp > 82)
     # String Mismatch: if we have string columns, check max - min
     string_cols = [c for c in df.columns if "string" in c.lower() or "pv" in c.lower() and "power" not in c.lower()]
     string_mismatch = pd.Series(False, index=df.index)
     if string_cols:
         string_data = df[string_cols].astype(float)
-        string_mismatch = (string_data.max(axis=1) - string_data.min(axis=1)) > 5.0 # arbitrary threshold
+        string_mismatch = (string_data.max(axis=1) - string_data.min(axis=1)) > 10.0 # higher threshold
         
-    # Grid instability: Frequency deviation > 0.5 Hz or Voltage > 250 or < 200
+    # Grid instability: Frequency deviation > 0.5 Hz
     grid_instability = (freq > 50.5) | (freq < 49.5)
     v_cols = [c for c in ["meter_v_r", "meter_v_y", "meter_v_b"] if c in df.columns]
     if v_cols:

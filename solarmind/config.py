@@ -46,10 +46,15 @@ RISK_THRESHOLDS: Dict[str, float] = {
 }
 
 # ── LLM / GenAI ──────────────────────────────────────────────────────
-LLM_MODEL: str = os.getenv("LLM_MODEL", "openai/gpt-4o-mini")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-1.5-flash")
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "dummy_key_to_bypass_onnx_crash")
 OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "")
+GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
+# Heuristic coefficients for risk calculation
+ANOMALY_WEIGHT: float = 0.4
+SUPERVISED_WEIGHT: float = 0.6
 
 # ── RAG / ChromaDB ───────────────────────────────────────────────────
 CHROMA_PERSIST_DIR: Path = PROJECT_ROOT / "rag" / "chroma_store"
@@ -107,18 +112,31 @@ LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
 
 def risk_level_from_score(score: float) -> str:
-    """Derive a risk level string from a numeric risk score.
-
-    Args:
-        score: Calibrated probability in [0, 1].
-
-    Returns:
-        One of ``"LOW"``, ``"MEDIUM"``, ``"HIGH"``, or ``"CRITICAL"``.
-    """
-    if score < RISK_THRESHOLDS["LOW"]:
+    """Derive a risk level string from a numeric risk score."""
+    if score < 0.3:
         return "LOW"
-    if score < RISK_THRESHOLDS["MEDIUM"]:
+    if score < 0.6:
         return "MEDIUM"
-    if score < RISK_THRESHOLDS["HIGH"]:
+    if score < 0.8:
         return "HIGH"
     return "CRITICAL"
+
+def compute_ttf_hours(risk_score: float, temp_gradient: float, efficiency_drop: float) -> Optional[int]:
+    """Dynamically compute Time-To-Failure (TTF) estimate."""
+    if risk_score < 0.4:
+        return None
+    
+    # Base TTF on risk score
+    base_ttf = 168 # 1 week
+    if risk_score > 0.9: base_ttf = 12
+    elif risk_score > 0.8: base_ttf = 24
+    elif risk_score > 0.7: base_ttf = 48
+    elif risk_score > 0.6: base_ttf = 72
+    
+    # Accelerate if thermal gradient is high or efficiency is dropping
+    if temp_gradient > 2.0: # Rising fast
+        base_ttf = int(base_ttf * 0.7)
+    if efficiency_drop > 0.05: # Dropping
+        base_ttf = int(base_ttf * 0.8)
+        
+    return max(6, base_ttf) # Minimum 6 hours for maintenance dispatch

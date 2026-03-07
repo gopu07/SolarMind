@@ -91,7 +91,6 @@ FEATURE_COLUMNS: List[str] = [
     "meter_active_power", "meter_pf", "meter_freq",
     "meter_v_r", "meter_v_y", "meter_v_b",
     "inverter_temperature",
-    "inverter_op_state", "inverter_limit_percent",
 ]
 
 _STRING_COLS: List[str] = [f"smu_string{i}" for i in range(1, 25)] + [f"inv_string{i}" for i in range(1, 25)]
@@ -394,7 +393,8 @@ def compute_features_batch(master: pd.DataFrame) -> pd.DataFrame:
 
     id_cols = ["inverter_id", "plant_id", "block_id", "timestamp"]
     label_cols = ["label", "label_source"]
-    keep = id_cols + [c for c in label_cols if c in result.columns] + FEATURE_COLUMNS
+    telemetry_cols = ["inverter_temperature", "pv1_power", "conversion_efficiency"]
+    keep = id_cols + [c for c in label_cols if c in result.columns] + telemetry_cols + FEATURE_COLUMNS
     result = result[[c for c in keep if c in result.columns]].copy()
 
     out_path = config.PROCESSED_DIR / "features.parquet"

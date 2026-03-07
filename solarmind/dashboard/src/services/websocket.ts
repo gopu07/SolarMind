@@ -49,12 +49,12 @@ class WebSocketService {
               efficiency: number;
               power: number;
             }
-            const mapped: Inverter[] = data.inverters.map((inv: WSInverter) => ({
+            const mapped: Inverter[] = data.inverters.map((inv: any) => ({
               id: inv.inverter_id,
               name: `Inverter ${inv.inverter_id.split('_').pop()}`,
-              risk_score: inv.risk_score,
-              risk_level: this.getRiskLevel(inv.risk_score),
-              status: this.getStatus(inv.risk_score),
+              risk_score: inv.final_risk_score || inv.risk_score,
+              risk_level: this.getRiskLevel(inv.final_risk_score || inv.risk_score),
+              status: this.getStatus(inv.final_risk_score || inv.risk_score),
               temperature: inv.temperature,
               efficiency: inv.efficiency,
               power_output: inv.power,

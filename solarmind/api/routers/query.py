@@ -37,7 +37,6 @@ log = structlog.get_logger(__name__)
 router = APIRouter(
     prefix="/query",
     tags=["RAG"],
-    dependencies=[Depends(get_current_user)],
 )
 
 
@@ -49,7 +48,6 @@ def _load_v3_prompt() -> str:
             return f.read()
     except FileNotFoundError:
         log.warning("v3_prompt_missing", fallback="v2")
-        # Fallback to basic prompting
         return (
             "You are a solar PV expert. Analyze the following context and "
             "telemetry data to answer the question. Return JSON with keys: "
@@ -110,7 +108,7 @@ async def query_rag(req: QueryRequest):
     """Run a grounded multi-stage RAG query with diagnostic reasoning."""
     start_time = time.perf_counter()
 
-    # ── Stage 1: Hybrid retrieval ─────────────────────────────────────
+    # 1. Hybrid retrieval
     retrieval_result = hybrid_query(
         question=req.question,
         plant_id=req.plant_id,
@@ -123,7 +121,7 @@ async def query_rag(req: QueryRequest):
     history = retrieval_result["history"]
     stats = retrieval_result["stats"]
 
-    # ── Build citations ───────────────────────────────────────────────
+    # Build citations
     citations = []
     context_chunks = []
     for r in results:
@@ -144,7 +142,7 @@ async def query_rag(req: QueryRequest):
             f"score={r.get('combined_score', 0):.3f}]:\n{content}"
         )
 
-    # ── Build historical context ──────────────────────────────────────
+    # Build historical context
     history_parts = []
     for h in history:
         hmeta = h.get("metadata", {})
@@ -155,8 +153,7 @@ async def query_rag(req: QueryRequest):
             f"{h.get('content', '')[:300]}"
         )
 
-    # ── Stage 2: Telemetry context injection ──────────────────────────
-    # Extract inverter ID from query if present
+    # 2. Telemetry context injection
     inv_match = re.search(r"(INV[-_]\d+)", req.question.upper())
     inverter_id = inv_match.group(1).replace("-", "_") if inv_match else None
 
@@ -170,19 +167,13 @@ async def query_rag(req: QueryRequest):
         anomaly_lines = [f"- [{a['severity']}] {a['description']}" for a in anomalies]
         anomaly_summary = f"{len(anomalies)} anomalies detected:\n" + "\n".join(anomaly_lines)
 
-    # ── Session state ─────────────────────────────────────────────────
+    # Session state
     session = get_session(req.session_id)
     if inverter_id:
         session.last_inverter = inverter_id
         session.last_intent = "inverter_diagnostics"
 
-    # Handle follow-up context
-    q_lower = req.question.lower()
-    if any(term in q_lower for term in ["yes", "show details", "tell me more"]):
-        if session.last_inverter and not inverter_id:
-            inverter_id = session.last_inverter
-
-    # ── Context header ────────────────────────────────────────────────
+    # Context header
     context_header = ""
     if inverter_id:
         context_header = f"Focus on Inverter {inverter_id}"
@@ -191,22 +182,14 @@ async def query_rag(req: QueryRequest):
     elif req.plant_id:
         context_header = f"Plant-wide analysis for {req.plant_id}"
 
-    # ── Stage 3: LLM generation with chain-of-thought ─────────────────
-    answer = "LLM unavailable or API key missing."
+    # 3. LLM generation with chain-of-thought
+    answer = "LLM unavailable. Falling back to rule-based summary."
     diagnostic_report = None
 
-    if config.OPENAI_API_KEY:
+    if config.GEMINI_API_KEY or config.OPENAI_API_KEY:
         try:
-            import openai
-
-            client_kwargs: Dict[str, Any] = {"api_key": config.OPENAI_API_KEY}
-            if config.OPENAI_BASE_URL:
-                client_kwargs["base_url"] = config.OPENAI_BASE_URL
-            client = openai.OpenAI(**client_kwargs)
-
             template = _load_v3_prompt()
 
-            # ── Fetch Phase 2.5 Predictive Maintenance Context ─────────────────
             timeline_events = await get_timeline_events()
             maintenance_tasks = await get_maintenance_schedule()
             
@@ -237,19 +220,7 @@ async def query_rag(req: QueryRequest):
                 question=req.question,
             )
 
-            resp = client.chat.completions.create(
-                model=config.LLM_MODEL,
-                messages=[
-                    {"role": "user", "content": full_prompt},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.1,
-                timeout=30.0,
-            )
-
-            raw_answer = resp.choices[0].message.content or ""
-
-            # Parse into structured DiagnosticReport
+            raw_answer = llm_service.generate_response(full_prompt, system_prompt="Return JSON diagnostic report.")
             diagnostic_report = _parse_diagnostic_report(raw_answer)
 
             if diagnostic_report:
@@ -263,10 +234,8 @@ async def query_rag(req: QueryRequest):
                     for ra in diagnostic_report.recommended_actions:
                         answer += f"- [{ra.priority}] {ra.action}\n"
             else:
-                # Fallback: use raw LLM text
                 answer = raw_answer
 
-            # Append to history
             session.history.append({"role": "user", "content": req.question})
             session.history.append({"role": "assistant", "content": answer})
             if len(session.history) > 10:

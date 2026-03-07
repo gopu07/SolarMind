@@ -26,7 +26,6 @@ log = structlog.get_logger(__name__)
 router = APIRouter(
     prefix="/predict",
     tags=["Prediction"],
-    dependencies=[Depends(get_current_user)],
 )
 
 @router.post("", response_model=PredictionResult)

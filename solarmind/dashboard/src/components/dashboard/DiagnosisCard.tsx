@@ -18,6 +18,7 @@ export function DiagnosisCard({ inverterId = "INV-14" }: DiagnosisCardProps) {
   const [report, setReport] = useState<DiagnosticReport | null>(null);
 
   useEffect(() => {
+    if (!inverterId) return;
     getInverterReport(inverterId).then(setReport);
   }, [inverterId]);
 
@@ -38,10 +39,9 @@ export function DiagnosisCard({ inverterId = "INV-14" }: DiagnosisCardProps) {
           <span className="text-xs text-muted-foreground w-20">Risk Score</span>
           <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${
-                report.risk_score > 0.85 ? "bg-destructive" :
-                report.risk_score > 0.6 ? "bg-warning" : "bg-primary"
-              }`}
+              className={`h-full rounded-full transition-all ${report.risk_score > 0.85 ? "bg-destructive" :
+                  report.risk_score > 0.6 ? "bg-warning" : "bg-primary"
+                }`}
               style={{ width: `${report.risk_score * 100}%` }}
             />
           </div>

@@ -194,7 +194,7 @@ def train(include_inferred: bool = False) -> Dict[str, Any]:
         return np.mean(scores) if scores else 0.0
 
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=1)
+    study.optimize(objective, n_trials=5)
     best_params = study.best_params
     log.info("optuna_best_params", params=best_params)
 

@@ -84,41 +84,23 @@ def expand_queries(question: str, n: int = 3) -> List[str]:
     queries = [question]
 
     # Try LLM expansion first
-    if config.OPENAI_API_KEY:
-        try:
-            import openai
-
-            client_kwargs: Dict[str, Any] = {"api_key": config.OPENAI_API_KEY}
-            if config.OPENAI_BASE_URL:
-                client_kwargs["base_url"] = config.OPENAI_BASE_URL
-            client = openai.OpenAI(**client_kwargs)
-
-            resp = client.chat.completions.create(
-                model=config.LLM_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a solar plant expert. Generate exactly "
-                            f"{n - 1} alternative search queries for the "
-                            "following question. Each query should capture a "
-                            "different aspect or use different technical "
-                            "terminology. Return ONLY the queries, one per "
-                            "line, with no numbering or bullets."
-                        ),
-                    },
-                    {"role": "user", "content": question},
-                ],
-                temperature=0.7,
-                max_tokens=300,
-            )
-            raw = resp.choices[0].message.content or ""
-            for line in raw.strip().splitlines():
-                line = line.strip().lstrip("0123456789.-) ")
-                if line and line != question:
-                    queries.append(line)
-        except Exception as e:
-            log.warning("multi_query_expansion_failed", error=str(e))
+    from rag.llm_service import llm_service
+    try:
+        sys_prompt = (
+            "You are a solar plant expert. Generate exactly "
+            f"{n - 1} alternative search queries for the "
+            "following question. Each query should capture a "
+            "different aspect or use different technical "
+            "terminology. Return ONLY the queries, one per "
+            "line, with no numbering or bullets."
+        )
+        raw = llm_service.generate_response(question, sys_prompt)
+        for line in raw.strip().splitlines():
+            line = line.strip().lstrip("0123456789.-) ")
+            if line and line != question:
+                queries.append(line)
+    except Exception as e:
+        log.warning("multi_query_expansion_failed", error=str(e))
 
     # Heuristic fallback: append simple reformulations
     if len(queries) < n:
@@ -145,17 +127,10 @@ def rerank_results(
     """
     if not candidates:
         return []
-    if not config.OPENAI_API_KEY:
-        return candidates[:top_k]
+    from rag.llm_service import llm_service
+    import json as _json
 
     try:
-        import openai, json as _json
-
-        client_kwargs: Dict[str, Any] = {"api_key": config.OPENAI_API_KEY}
-        if config.OPENAI_BASE_URL:
-            client_kwargs["base_url"] = config.OPENAI_BASE_URL
-        client = openai.OpenAI(**client_kwargs)
-
         # Build compact summaries for the batch
         doc_summaries = []
         for i, cand in enumerate(candidates[:config.RAG_RERANK_TOP_K]):
@@ -163,30 +138,26 @@ def rerank_results(
             doc_summaries.append(f"[{i}] {content}")
 
         batch_text = "\n\n".join(doc_summaries)
-
-        resp = client.chat.completions.create(
-            model=config.LLM_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a relevance judge for a solar plant diagnostic system. "
-                        "Rate each document's relevance to the question on a scale of 0-10. "
-                        "Return ONLY a JSON object mapping document index to score, e.g. "
-                        '{"0": 8, "1": 3, "2": 9}.'
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Question: {question}\n\nDocuments:\n{batch_text}",
-                },
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.0,
-            max_tokens=200,
+        
+        sys_prompt = (
+            "You are a relevance judge for a solar plant diagnostic system. "
+            "Rate each document's relevance to the question on a scale of 0-10. "
+            "Return ONLY a JSON object mapping document index to score, e.g. "
+            '{"0": 8, "1": 3, "2": 9}.'
         )
-
-        raw_scores = _json.loads(resp.choices[0].message.content or "{}")
+        
+        user_prompt = f"Question: {question}\n\nDocuments:\n{batch_text}"
+        
+        raw_text = llm_service.generate_response(user_prompt, sys_prompt)
+        
+        # Clean potential markdown from response
+        cleaned = raw_text.strip()
+        if "```json" in cleaned:
+            cleaned = cleaned.split("```json")[-1].split("```")[0].strip()
+        elif "```" in cleaned:
+            cleaned = cleaned.split("```")[-1].split("```")[0].strip()
+            
+        raw_scores = _json.loads(cleaned)
 
         for idx_str, score in raw_scores.items():
             try:

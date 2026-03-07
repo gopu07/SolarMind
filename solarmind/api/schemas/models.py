@@ -119,6 +119,7 @@ class NarrativeRequest(BaseModel):
 # =====================================================================
 class QueryRequest(BaseModel):
     question: str
+    session_id: str = "default"
     plant_id: Optional[str] = None
     top_k: int = Field(default=5, ge=1, le=20)
     enable_multi_query: bool = True
