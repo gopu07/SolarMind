@@ -32,7 +32,18 @@ def _get_embedding_function():
             )
         except Exception as e:
             log.warning("openai_embedding_failed", error=str(e), fallback="default")
-    return embedding_functions.DefaultEmbeddingFunction()
+    try:
+        return embedding_functions.DefaultEmbeddingFunction()
+    except Exception as e:
+        log.warning("default_embedding_init_failed", error=str(e), hint="Attempting SentenceTransformer fallback")
+        try:
+            return embedding_functions.SentenceTransformerEmbeddingFunction()
+        except:
+            log.error("all_embeddings_failed")
+            # If everything fails, return a function that returns zeros to keep system alive
+            class ZeroEmbedding:
+                def __call__(self, texts): return [[0.0]*384 for _ in texts]
+            return ZeroEmbedding()
 
 
 def get_chroma_client() -> chromadb.PersistentClient:

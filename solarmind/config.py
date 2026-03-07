@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from dotenv import load_dotenv
 
@@ -51,6 +51,12 @@ EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "dummy_key_to_bypass_onnx_crash")
 OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "")
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
+# Flag to check if we have any valid-looking API key
+def _is_dummy(key: str) -> bool:
+    return not key or "dummy" in key.lower() or "your-key" in key.lower()
+
+LLM_API_KEYS_AVAILABLE: bool = not (_is_dummy(OPENAI_API_KEY) and _is_dummy(GEMINI_API_KEY))
 
 # Heuristic coefficients for risk calculation
 ANOMALY_WEIGHT: float = 0.4

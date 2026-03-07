@@ -272,7 +272,7 @@ async def list_inverters():
             "anomaly_score": float(inv_data.get("anomaly_score", 0.0)),
             "status": risk_level.lower().replace("high", "high_risk").replace("medium", "warning").replace("low", "healthy"),
             "temperature": float(inv_data.get("temperature", 0.0)),
-            "efficiency": float(inv_data.get("efficiency", 0.0)),
+            "efficiency": float(inv_data.get("efficiency", 0.0)) * 100,
             "power_output": float(inv_data.get("power", 0.0)),
             "string_mismatch": 0.0,
             "location": "Main Array",
@@ -450,9 +450,11 @@ async def websocket_push_loop():
                 final_risk_score = (config.SUPERVISED_WEIGHT * risk_score) + (config.ANOMALY_WEIGHT * anomaly_score)
                 
                 inv_update: Dict[str, Any] = {
+                    "id": row["inverter_id"], # Match frontend 'id' field
                     "inverter_id": row["inverter_id"],
                     "plant_id": row["plant_id"],
-                    "risk_score": risk_score,
+                    "risk_score": final_risk_score, # Use weighted score for dashboard
+                    "raw_risk_score": risk_score,
                     "anomaly_score": anomaly_score,
                     "final_risk_score": final_risk_score,
                     "temperature": float(row["inverter_temperature"]) if pd.notna(row["inverter_temperature"]) else 0.0,
@@ -461,6 +463,9 @@ async def websocket_push_loop():
                     "label": int(row["label"]) if pd.notna(row["label"]) else 0,
                     "top_features": top_features,
                 }
+                
+                # Update status based on risk
+                inv_update["status"] = config.risk_level_from_score(final_risk_score).lower().replace("high", "high_risk").replace("medium", "warning").replace("low", "healthy")
                 
                 inv_update["predicted_failure_hours"] = config.compute_ttf_hours(
                     final_risk_score, 

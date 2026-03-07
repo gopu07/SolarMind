@@ -7,25 +7,37 @@ interface TrendChartsProps {
   inverterId?: string;
 }
 
-export function TrendCharts({ inverterId = "INV-14" }: TrendChartsProps) {
+type ChartKey = "temperature" | "efficiency" | "string_mismatch" | "power" | "risk";
+
+export function TrendCharts({ inverterId }: TrendChartsProps) {
   const [data, setData] = useState<TelemetryPoint[]>([]);
-  const [activeChart, setActiveChart] = useState<"temperature" | "efficiency" | "string_mismatch">("temperature");
+  const [activeChart, setActiveChart] = useState<ChartKey>("temperature");
 
   useEffect(() => {
     if (!inverterId) return;
     getTelemetry(inverterId).then(setData);
   }, [inverterId]);
 
-  const chartConfig = {
-    temperature: { label: "Temperature (°C)", color: "hsl(0, 84%, 60%)", key: "temperature" as const },
-    efficiency: { label: "Efficiency (%)", color: "hsl(142, 72%, 50%)", key: "efficiency" as const },
-    string_mismatch: { label: "String Mismatch", color: "hsl(210, 100%, 56%)", key: "string_mismatch" as const },
+  const chartConfig: Record<ChartKey, { label: string; color: string; key: keyof TelemetryPoint }> = {
+    temperature: { label: "Temperature (°C)", color: "hsl(0, 84%, 60%)", key: "temperature" },
+    efficiency: { label: "Efficiency (%)", color: "hsl(142, 72%, 50%)", key: "efficiency" },
+    string_mismatch: { label: "String Mismatch", color: "hsl(210, 100%, 56%)", key: "string_mismatch" },
+    power: { label: "Power (kW)", color: "hsl(27, 96%, 61%)", key: "power" },
+    risk: { label: "Risk Score", color: "hsl(280, 84%, 60%)", key: "risk" },
   };
 
   const config = chartConfig[activeChart];
-  const formatted = data.map(d => ({
+
+  const formatted = data.map((d) => ({
     ...d,
-    time: new Date(d.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    time:
+      d.time ||
+      new Date(d.timestamp).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    power: d.power ?? d.power_output ?? 0,
+    risk: d.risk ?? 0,
   }));
 
   return (
@@ -34,23 +46,32 @@ export function TrendCharts({ inverterId = "INV-14" }: TrendChartsProps) {
         <div>
           <h3 className="text-sm font-black text-foreground uppercase tracking-widest flex items-center gap-2">
             <div className="h-4 w-1 bg-secondary rounded-full" />
-            Telemetry <span className="text-secondary opacity-70">— {inverterId}</span>
+            Telemetry{" "}
+            <span className="text-secondary opacity-70">
+              — {inverterId ?? "Select inverter"}
+            </span>
           </h3>
-          <p className="text-[10px] text-muted-foreground font-mono mt-1 uppercase">Historical Performance Patterns</p>
+          <p className="text-[10px] text-muted-foreground font-mono mt-1 uppercase">
+            Historical Performance Patterns (48h)
+          </p>
         </div>
         <div className="flex bg-muted/30 p-1 rounded-xl border border-border/40">
-          {Object.entries(chartConfig).map(([key, cfg]) => (
-            <button
-              key={key}
-              onClick={() => setActiveChart(key as typeof activeChart)}
-              className={`px-4 py-2 text-[10px] rounded-lg font-bold transition-all ${activeChart === key
-                ? "bg-secondary text-secondary-foreground shadow-lg"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          {(Object.keys(chartConfig) as ChartKey[]).map((key) => {
+            const cfg = chartConfig[key];
+            return (
+              <button
+                key={key}
+                onClick={() => setActiveChart(key)}
+                className={`px-4 py-2 text-[10px] rounded-lg font-bold transition-all ${
+                  activeChart === key
+                    ? "bg-secondary text-secondary-foreground shadow-lg"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                 }`}
-            >
-              {cfg.label.split(" (")[0].toUpperCase()}
-            </button>
-          ))}
+              >
+                {cfg.label.split(" (")[0].toUpperCase()}
+              </button>
+            );
+          })}
         </div>
       </div>
       <div className="h-[280px] w-full">
@@ -69,7 +90,7 @@ export function TrendCharts({ inverterId = "INV-14" }: TrendChartsProps) {
               fontSize={10}
               tickLine={false}
               axisLine={false}
-              interval={Math.floor(formatted.length / 6)}
+              interval={Math.max(1, Math.floor(formatted.length / 6))}
               dy={10}
             />
             <YAxis
@@ -77,7 +98,11 @@ export function TrendCharts({ inverterId = "INV-14" }: TrendChartsProps) {
               fontSize={10}
               tickLine={false}
               axisLine={false}
-              tickFormatter={(val) => `${val}${activeChart === "efficiency" ? "%" : ""}`}
+              tickFormatter={(val) => {
+                if (activeChart === "efficiency") return `${val}%`;
+                if (activeChart === "risk") return (val as number).toFixed(2);
+                return String(val);
+              }}
             />
             <Tooltip
               contentStyle={{
@@ -91,7 +116,7 @@ export function TrendCharts({ inverterId = "INV-14" }: TrendChartsProps) {
             />
             <Line
               type="monotone"
-              dataKey={config.key}
+              dataKey={config.key as any}
               stroke={config.color}
               strokeWidth={3}
               dot={false}

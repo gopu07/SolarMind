@@ -51,18 +51,23 @@ export function KPICards({ inverters }: KPICardsProps) {
           key={card.label}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: i * 0.1 }}
-          className={`glass-card p-5 border ${card.border} ${card.glow ? "neon-glow-red animate-pulse-glow" : ""}`}
+          transition={{ delay: i * 0.05, type: "spring", stiffness: 100 }}
+          whileHover={{ y: -5, transition: { duration: 0.2 } }}
+          className={`glass-card p-5 border ${card.border} ${card.glow ? "neon-glow-red animate-pulse-glow" : ""} relative overflow-hidden group`}
         >
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{card.label}</span>
-            <div className={`p-2 rounded-lg ${card.bg}`}>
+          <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="flex items-center justify-between mb-4 relative z-10">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em]">{card.label}</span>
+            <div className={`p-2 rounded-xl ${card.bg} border border-white/5 shadow-inner`}>
               <card.icon className={`h-4 w-4 ${card.color}`} />
             </div>
           </div>
-          <div className={`text-3xl font-bold font-mono ${card.color}`}>
-            {card.value}
+          <div className="relative z-10 flex items-baseline gap-1">
+            <div className={`text-4xl font-black font-mono tracking-tighter ${card.color} neon-text`}>
+              {card.value}
+            </div>
           </div>
+          <div className={`absolute bottom-0 left-0 w-full h-1 ${card.color.replace("text-", "bg-")} opacity-20`} />
         </motion.div>
       ))}
     </div>

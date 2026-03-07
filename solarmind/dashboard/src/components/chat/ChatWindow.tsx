@@ -3,6 +3,7 @@ import { Send, Bot, User, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import { queryAI } from "@/services/api";
+import { useInverters } from "@/hooks/useInverters";
 
 interface Message {
   id: string;
@@ -11,14 +12,9 @@ interface Message {
   timestamp: Date;
 }
 
-const quickPrompts = [
-  "Which inverter has highest thermal anomaly?",
-  "Which inverters are at risk this week?",
-  "Why is INV-14 failing?",
-  "Give me a plant health summary",
-];
 
 export function ChatWindow() {
+  const { selectedInverterId } = useInverters();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -51,10 +47,15 @@ export function ChatWindow() {
     setIsLoading(true);
 
     try {
-      const response = await queryAI(question, sessionId);
+      const response = await queryAI(question, sessionId, { inverterId: selectedInverterId ?? undefined });
       setMessages(prev => [
         ...prev,
-        { id: (Date.now() + 1).toString(), role: "assistant", content: response, timestamp: new Date() },
+        {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: response.answer,
+          timestamp: new Date(),
+        },
       ]);
     } catch {
       setMessages(prev => [
@@ -82,8 +83,8 @@ export function ChatWindow() {
                 {msg.role === "assistant" ? <Bot className="h-4 w-4" /> : <User className="h-4 w-4" />}
               </div>
               <div className={`max-w-[80%] rounded-xl p-4 text-sm ${msg.role === "user"
-                  ? "bg-secondary/10 border border-secondary/20"
-                  : "glass-card"
+                ? "bg-secondary/10 border border-secondary/20"
+                : "glass-card"
                 }`}>
                 <div className="prose prose-sm prose-invert max-w-none [&_table]:text-xs [&_th]:p-2 [&_td]:p-2 [&_code]:text-primary [&_code]:bg-primary/10 [&_code]:px-1 [&_code]:rounded">
                   <ReactMarkdown>{msg.content}</ReactMarkdown>
@@ -112,21 +113,6 @@ export function ChatWindow() {
         )}
       </div>
 
-      {messages.length <= 1 && (
-        <div className="px-4 pb-2">
-          <div className="flex flex-wrap gap-2">
-            {quickPrompts.map((prompt) => (
-              <button
-                key={prompt}
-                onClick={() => handleSend(prompt)}
-                className="text-xs px-3 py-1.5 rounded-full border border-primary/20 text-primary hover:bg-primary/10 transition-colors"
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="p-4 border-t border-border/40">
         <form

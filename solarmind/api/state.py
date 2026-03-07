@@ -38,7 +38,7 @@ class PlantStateManager:
                     "temperature": inv_data.get("temperature"),
                     "power": inv_data.get("power"),
                     "efficiency": inv_data.get("efficiency"),
-                    "risk_score": inv_data.get("risk_score"),
+                    "risk_score": inv_data.get("final_risk_score", inv_data.get("risk_score")),
                     "anomaly_score": inv_data.get("anomaly_score")
                 }
                 self.plant_state["history"][inv_id].append(history_entry)

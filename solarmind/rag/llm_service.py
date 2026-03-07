@@ -14,7 +14,7 @@ class LLMService:
         self.client = None
         self.provider = "none"
 
-        if self.gemini_key:
+        if self.gemini_key and not config._is_dummy(self.gemini_key):
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=self.gemini_key)
@@ -24,7 +24,7 @@ class LLMService:
             except ImportError:
                 log.warning("google_generativeai_not_installed", fallback="openai")
         
-        if not self.client and self.openai_key:
+        if not self.client and self.openai_key and not config._is_dummy(self.openai_key):
             try:
                 import openai
                 client_kwargs = {"api_key": self.openai_key}

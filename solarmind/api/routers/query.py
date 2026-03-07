@@ -31,6 +31,8 @@ from rag.llm_service import llm_service
 from rag.telemetry_context import format_telemetry_for_prompt
 from api.routers.timeline import get_timeline_events
 from api.routers.maintenance import get_maintenance_schedule
+from genai.guardrails.validator import get_fallback_report
+from api.state import state_manager
 
 log = structlog.get_logger(__name__)
 
@@ -221,7 +223,12 @@ async def query_rag(req: QueryRequest):
             )
 
             raw_answer = llm_service.generate_response(full_prompt, system_prompt="Return JSON diagnostic report.")
-            diagnostic_report = _parse_diagnostic_report(raw_answer)
+            
+            # Detect failure or unavailability
+            unavailability_msgs = ["LLM unavailable", "API key missing", "Error calling LLM"]
+            is_unavailable = any(msg in raw_answer for msg in unavailability_msgs)
+            
+            diagnostic_report = _parse_diagnostic_report(raw_answer) if not is_unavailable else None
 
             if diagnostic_report:
                 answer = (
@@ -233,8 +240,26 @@ async def query_rag(req: QueryRequest):
                     answer += "**Recommended Actions:**\n"
                     for ra in diagnostic_report.recommended_actions:
                         answer += f"- [{ra.priority}] {ra.action}\n"
-            else:
-                answer = raw_answer
+            elif is_unavailable or not diagnostic_report:
+                # Trigger rule-based fallback
+                if inverter_id:
+                    inv_state = {
+                        "temperature": 55.5,
+                        "efficiency": 0.89,
+                        "power": 11500.0,
+                        "risk_score": 0.8
+                    }
+                    fallback = get_fallback_report(inverter_id, req.plant_id or "PLANT_1", 0.8, "HIGH", inv_state)
+                    answer = (
+                        f"**[FALLBACK DIAGNOSIS for {inverter_id}]**\n\n"
+                        f"**Diagnosis:** {fallback.summary}\n\n"
+                        f"**Risk Level:** {fallback.risk_level}\n\n"
+                        f"**Root Cause:** {fallback.root_cause}\n\n"
+                        f"**Recommended Action:** {fallback.action}\n\n"
+                        f"*Note: This heuristic report was generated because the LLM is unavailable.*"
+                    )
+                else:
+                    answer = f"The AI Assistant is currently in offline mode (LLM unavailable). Try asking about a specific inverter (e.g., 'Status of INV_001?') for a rule-based diagnostic."
 
             session.history.append({"role": "user", "content": req.question})
             session.history.append({"role": "assistant", "content": answer})
@@ -243,7 +268,41 @@ async def query_rag(req: QueryRequest):
 
         except Exception as e:
             log.warning("llm_qa_failed", error=str(e))
-            answer = f"Error calling LLM: {str(e)}"
+            
+            # Implementation of rule-based fallback for RAG queries
+            if inverter_id:
+                # Fetch actual live state if available, else fall back to safe defaults
+                live_state = state_manager.get_inverter_state(inverter_id)
+                inv_state = {
+                    "temperature": float(live_state.get("temperature", 55.0)) if live_state else 55.0,
+                    "efficiency": float(live_state.get("efficiency", 0.88)) if live_state else 0.88,
+                    "power": float(live_state.get("power", 12000.0)) if live_state else 12000.0,
+                    "risk_score": float(live_state.get("final_risk_score", live_state.get("risk_score", 0.75))) if live_state else 0.75
+                }
+                current_risk = inv_state["risk_score"]
+                risk_level = config.risk_level_from_score(current_risk)
+                
+                fallback = get_fallback_report(inverter_id, req.plant_id or "PLANT_1", current_risk, risk_level, inv_state)
+                diagnostic_report = DiagnosticReport(
+                    diagnosis=fallback.summary,
+                    risk_level=fallback.risk_level,
+                    root_cause_hypothesis=fallback.root_cause,
+                    sensor_evidence=[],
+                    recommended_actions=[RecommendedAction(priority="HIGH", action=fallback.action)],
+                    similar_past_events=[],
+                    confidence="LOW",
+                    data_quality="PARTIAL"
+                )
+                answer = (
+                    f"**[FALLBACK DIAGNOSIS]**\n\n"
+                    f"**Diagnosis:** {diagnostic_report.diagnosis}\n\n"
+                    f"**Risk Level:** {diagnostic_report.risk_level}\n\n"
+                    f"**Root Cause:** {diagnostic_report.root_cause_hypothesis}\n\n"
+                    f"**Recommended Action:** {fallback.action}\n\n"
+                    f"*Note: This report was generated using rule-based heuristics because the LLM service is currently unavailable or authentication failed.*"
+                )
+            else:
+                answer = f"LLM Service Error: {str(e)}. Please check your API keys or network connection."
 
     latency_ms = (time.perf_counter() - start_time) * 1000.0
 

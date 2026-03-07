@@ -2,6 +2,7 @@ import { Link, useLocation } from "react-router-dom";
 import { Activity, Zap } from "lucide-react";
 import { motion } from "framer-motion";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { DebugPanel } from "@/components/debug/DebugPanel";
 
 export function Navbar() {
   const location = useLocation();
@@ -24,6 +25,7 @@ export function Navbar() {
         </Link>
 
         <div className="ml-auto flex items-center gap-3">
+          {!isLanding && <DebugPanel />}
           <motion.div
             className="flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-mono"
             animate={{ opacity: [0.7, 1, 0.7] }}

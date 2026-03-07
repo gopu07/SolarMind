@@ -55,7 +55,5 @@
   "meter_v_r",
   "meter_v_y",
   "meter_v_b",
-  "inverter_temperature",
-  "inverter_op_state",
-  "inverter_limit_percent"
+  "inverter_temperature"
 ]
