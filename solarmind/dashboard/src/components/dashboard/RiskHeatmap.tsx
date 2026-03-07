@@ -51,14 +51,8 @@ export function RiskHeatmap({ inverters, onSelect }: RiskHeatmapProps) {
               transition={{ delay: i * 0.02, type: "spring", stiffness: 200 }}
               whileHover={{ scale: 1.05, zIndex: 10 }}
               whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                if (onSelect) {
-                  onSelect(inv.id);
-                } else {
-                  navigate(`/inverter/${inv.id}`);
-                }
-              }}
-              className={`relative p-3 rounded-xl border-2 ${colors.bg} ${colors.border} cursor-pointer transition-all hover:shadow-[0_0_20px_rgba(var(--primary),0.2)] group/cell overflow-hidden`}
+              onClick={() => navigate(`/inverter/${inv.id}`)}
+              className={`relative p-3 rounded-lg border ${colors.bg} ${colors.border} cursor-pointer transition-all hover:shadow-lg group`}
             >
               <div className="absolute inset-0 bg-white/5 opacity-0 group-hover/cell:opacity-100 transition-opacity" />
               <div className={`text-[9px] font-mono font-bold ${colors.text} opacity-70 mb-1`}>{inv.id.replace("INV_", "")}</div>
