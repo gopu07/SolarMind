@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Zap, Brain, Shield, Workflow, BarChart3, Bot, ArrowRight, Activity } from "lucide-react";
 
 const features = [
-  { icon: Brain, title: "ML Failure Prediction", desc: "LSTM + XGBoost models predict inverter failures 48 hours in advance with 94% accuracy." },
+  { icon: Brain, title: "ML Failure Prediction", desc: "XGBoost models predict inverter failures 48 hours in advance with 94% accuracy." },
   { icon: Shield, title: "SHAP Explainability", desc: "Understand exactly why an inverter is at risk with transparent feature-level explanations." },
   { icon: Workflow, title: "Autonomous Maintenance", desc: "AI agents automatically generate work orders and prioritize maintenance schedules." },
   { icon: BarChart3, title: "Real-Time Monitoring", desc: "WebSocket-powered live telemetry streaming with sub-second dashboard updates." },
@@ -13,7 +13,7 @@ const features = [
 
 const archLayers = [
   { label: "Data Pipeline", desc: "SCADA · IoT Sensors · Weather API", color: "border-secondary/40 bg-secondary/5" },
-  { label: "ML Engine", desc: "LSTM · XGBoost · Anomaly Detection", color: "border-primary/40 bg-primary/5" },
+  { label: "ML Engine", desc: "XGBoost · Anomaly Detection", color: "border-primary/40 bg-primary/5" },
   { label: "GenAI Layer", desc: "LLM Diagnostics · RAG · SHAP", color: "border-neon-purple/40 bg-neon-purple/5" },
   { label: "FastAPI Backend", desc: "REST · WebSocket · Agent Orchestration", color: "border-warning/40 bg-warning/5" },
   { label: "React Dashboard", desc: "Monitoring · Analytics · Assistant", color: "border-secondary/40 bg-secondary/5" },
