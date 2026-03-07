@@ -6,6 +6,15 @@ By unpivoting complex, multi-dimensional datalogger telemetry and applying local
 
 ---
 
+## 🚀 Recent Updates (System Repairs)
+The SolarMind platform has undergone a comprehensive system repair to ensure robust data integrity, real-time metrics, and reliable AI diagnostics:
+- **Risk Score Pipeline**: Refactored ML pipelines to preserve continuous probability outputs (0.0 to 1.0) and corrected risk thresholds.
+- **Unified Data State**: Implemented a global `PlantStateManager` to serve as a single source of truth for all APIs, WebSocket broadcasts, and RAG contexts.
+- **Frontend Architecture**: Transitioned the React dashboard to a centralized Zustand store (`useStore.ts`) for synchronized, real-time telemetry rendering (Heatmaps, KPI Cards, Alerts).
+- **Dynamic AI Assistant**: Replaced static fallback diagnostics with a telemetry-driven engine that grounds RAG responses in live inverter conditions (Temperature, Power, Efficiency).
+
+---
+
 ## 💎 Core Capabilities
 
 ### 1. Heterogeneous Ensemble Engine (Layer 3)
