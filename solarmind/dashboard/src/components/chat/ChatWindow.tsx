@@ -3,6 +3,7 @@ import { Send, Bot, User, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import { queryAI } from "@/services/api";
+import { useInverters } from "@/hooks/useInverters";
 
 interface Message {
   id: string;
@@ -19,6 +20,7 @@ const quickPrompts = [
 ];
 
 export function ChatWindow() {
+  const { selectedInverterId } = useInverters();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -51,10 +53,15 @@ export function ChatWindow() {
     setIsLoading(true);
 
     try {
-      const response = await queryAI(question, sessionId);
+      const response = await queryAI(question, sessionId, { inverterId: selectedInverterId ?? undefined });
       setMessages(prev => [
         ...prev,
-        { id: (Date.now() + 1).toString(), role: "assistant", content: response, timestamp: new Date() },
+        {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: response.answer,
+          timestamp: new Date(),
+        },
       ]);
     } catch {
       setMessages(prev => [

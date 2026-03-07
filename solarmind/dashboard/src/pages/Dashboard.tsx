@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { KPICards } from "@/components/dashboard/KPICards";
 import { RiskHeatmap } from "@/components/dashboard/RiskHeatmap";
@@ -9,22 +8,12 @@ import { DriftPanel } from "@/components/dashboard/DriftPanel";
 import { TicketPanel } from "@/components/dashboard/TicketPanel";
 import { FailureTimeline } from "@/components/dashboard/FailureTimeline";
 import { MaintenanceSchedule } from "@/components/dashboard/MaintenanceSchedule";
-import { getInverters } from "@/services/api";
-import { wsService } from "@/services/websocket";
-import type { Inverter } from "@/data/mockData";
 import { AppLayout } from "@/components/layout/AppLayout";
 
 import { useInverters } from "@/hooks/useInverters";
 
 export default function Dashboard() {
-  const { inverters, isLoading, error } = useInverters();
-  const [selectedInverter, setSelectedInverter] = useState("");
-
-  useEffect(() => {
-    if (inverters.length > 0 && !selectedInverter) {
-      setSelectedInverter(inverters[0].id);
-    }
-  }, [inverters, selectedInverter]);
+  const { inverters, isLoading, error, selectedInverterId, setSelectedInverterId } = useInverters();
 
   if (isLoading) return <div className="flex h-screen items-center justify-center font-mono text-primary">Loading monitoring data...</div>;
   if (error) return <div className="flex h-screen items-center justify-center text-destructive">{error}</div>;
@@ -51,8 +40,8 @@ export default function Dashboard() {
           <div className="flex items-center gap-3">
             <span className="text-xs font-mono text-muted-foreground hidden sm:inline">SELECT UNIT:</span>
             <select
-              value={selectedInverter}
-              onChange={(e) => setSelectedInverter(e.target.value)}
+              value={selectedInverterId ?? ""}
+              onChange={(e) => setSelectedInverterId(e.target.value)}
               className="rounded-xl border border-border/40 bg-muted/30 px-4 py-2 text-sm text-foreground font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all cursor-pointer hover:bg-muted/50"
             >
               {inverters.map(inv => (
@@ -101,8 +90,8 @@ export default function Dashboard() {
             transition={{ delay: 0.4 }}
             className="lg:col-span-2 space-y-6"
           >
-            <TrendCharts inverterId={selectedInverter} />
-            <DiagnosisCard inverterId={selectedInverter} />
+            <TrendCharts inverterId={selectedInverterId ?? undefined} />
+            <DiagnosisCard inverterId={selectedInverterId ?? undefined} />
           </motion.div>
           <motion.div
             initial={{ opacity: 0, y: 20 }}

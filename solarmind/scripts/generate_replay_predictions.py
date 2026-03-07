@@ -58,10 +58,23 @@ def main():
         # Map roughly to 0-1 where 1 is anomalous
         anomaly_score = np.clip(0.5 - iso_score, 0.0, 1.0)
         replay_df["anomaly_score"] = anomaly_score
-        replay_df["final_risk_score"] = 0.7 * y_prob + 0.3 * anomaly_score
-    else:
-        replay_df["anomaly_score"] = 0.0
-        replay_df["final_risk_score"] = y_prob
+    replay_df["final_risk_score"] = 0.7 * y_prob + 0.3 * anomaly_score
+    
+    # ── 2.5 Validation & Logging ──
+    print(f"📊 Risk Score Stats:")
+    print(f"    Min:  {replay_df['final_risk_score'].min():.4f}")
+    print(f"    Max:  {replay_df['final_risk_score'].max():.4f}")
+    print(f"    Mean: {replay_df['final_risk_score'].mean():.4f}")
+    print(f"    Std:  {replay_df['final_risk_score'].std():.4f}")
+    
+    binary_threshold = 0.05
+    near_0 = (replay_df['final_risk_score'] < binary_threshold).mean() * 100
+    near_1 = (replay_df['final_risk_score'] > (1.0 - binary_threshold)).mean() * 100
+    print(f"    Near 0 (fault-free): {near_0:.1f}%")
+    print(f"    Near 1 (critical):   {near_1:.1f}%")
+    
+    if near_1 > 80:
+        print("🚨 WARNING: High percentage of extreme risk predictions. Check feature scaling!")
     
     # ── 3. SHAP ──
     replay_df["top_shap_features"] = "[]"

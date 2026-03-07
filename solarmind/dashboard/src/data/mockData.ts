@@ -14,10 +14,13 @@ export interface Inverter {
 
 export interface TelemetryPoint {
   timestamp: string;
+  time?: string;
   temperature: number;
   efficiency: number;
-  string_mismatch: number;
-  power_output: number;
+  string_mismatch?: number;
+  power_output?: number;
+  power?: number;
+  risk?: number;
 }
 
 export interface DiagnosticReport {
@@ -91,12 +94,16 @@ export function generateTelemetry(inverterId: string, hours = 48): TelemetryPoin
     const hourOfDay = t.getHours();
     const dayCycle = Math.sin((hourOfDay - 6) * Math.PI / 12);
     
+    const power_output = Math.max(0, (inv.power_output + dayCycle * 8) * (dayCycle > 0 ? 1 : 0.1) + Math.random() * 2);
     return {
       timestamp: t.toISOString(),
+      time: t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       temperature: baseTemp + dayCycle * 8 + Math.random() * 3 + (inv.risk_score > 0.6 ? i * 0.05 : 0),
       efficiency: Math.max(50, baseEff - dayCycle * 3 + Math.random() * 2 - (inv.risk_score > 0.6 ? i * 0.03 : 0)),
       string_mismatch: inv.string_mismatch + Math.random() * 0.05 + (inv.risk_score > 0.6 ? i * 0.002 : 0),
-      power_output: Math.max(0, (inv.power_output + dayCycle * 8) * (dayCycle > 0 ? 1 : 0.1) + Math.random() * 2),
+      power_output,
+      power: power_output,
+      risk: inv.risk_score,
     };
   });
 }

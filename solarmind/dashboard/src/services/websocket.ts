@@ -1,12 +1,15 @@
-import { mockInverters, type Inverter } from "@/data/mockData";
+import type { Inverter } from "@/data/mockData";
 
 type WSCallback = (data: Inverter[]) => void;
+export type WSStatus = "connecting" | "connected" | "disconnected" | "error";
+type StatusCallback = (status: WSStatus) => void;
 
 const WS_BASE = import.meta.env.VITE_WS_BASE_URL || "ws://localhost:8000";
 
 class WebSocketService {
   private ws: WebSocket | null = null;
   private callbacks: Set<WSCallback> = new Set();
+  private statusCallbacks: Set<StatusCallback> = new Set();
   private reconnectAttempts = 0;
   private maxReconnectDelay = 30000;
 
@@ -24,11 +27,16 @@ class WebSocketService {
     return "healthy";
   }
 
+  private notifyStatus(status: WSStatus) {
+    this.statusCallbacks.forEach((cb) => cb(status));
+  }
+
   connect(plantId = "PLANT_1") {
     if (this.ws?.readyState === WebSocket.OPEN) return;
 
     const url = `${WS_BASE}/ws/stream/${plantId}`;
     console.log(`[WS] Connecting to ${url}...`);
+    this.notifyStatus("connecting");
 
     try {
       this.ws = new WebSocket(url);
@@ -36,12 +44,13 @@ class WebSocketService {
       this.ws.onopen = () => {
         console.log("[WS] Connected");
         this.reconnectAttempts = 0;
+        this.notifyStatus("connected");
       };
 
       this.ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'update' && data.inverters) {
+          if (data.type === "update" && data.inverters) {
             interface WSInverter {
               inverter_id: string;
               risk_score: number;
@@ -62,6 +71,10 @@ class WebSocketService {
               location: "Main Array",
               last_updated: data.timestamp
             }));
+            console.log("[WS] Update received", {
+              timestamp: data.timestamp,
+              count: mapped.length,
+            });
             this.callbacks.forEach(cb => cb(mapped));
           }
         } catch (e) {
@@ -71,6 +84,7 @@ class WebSocketService {
 
       this.ws.onclose = (e) => {
         this.ws = null;
+        this.notifyStatus("disconnected");
         if (e.code !== 1000) {
           const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
           console.warn(`[WS] Disconnected. Reconnecting in ${delay}ms...`);
@@ -81,6 +95,7 @@ class WebSocketService {
 
       this.ws.onerror = (err) => {
         console.error("[WS] Error", err);
+        this.notifyStatus("error");
       };
     } catch (err) {
       console.error("[WS] Sync error", err);
@@ -90,6 +105,11 @@ class WebSocketService {
   subscribe(cb: WSCallback) {
     this.callbacks.add(cb);
     return () => this.callbacks.delete(cb);
+  }
+
+  onStatus(cb: StatusCallback) {
+    this.statusCallbacks.add(cb);
+    return () => this.statusCallbacks.delete(cb);
   }
 
   disconnect() {
